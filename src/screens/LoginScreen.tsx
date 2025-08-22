@@ -1,66 +1,107 @@
-import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
-import { GoogleAuthProvider, signInWithCredential, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { auth } from '../services/firebase';
+import React, { useEffect, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInAnonymously } from 'firebase/auth';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../services/firebase';
 import { useAuth } from '../context/AuthContext';
-import { RootStackParamList } from '../navigation/RootNavigator';
 
-WebBrowser.maybeCompleteAuthSession();
-
-type LoginScreenNavigation = NativeStackNavigationProp<RootStackParamList, 'Login'>;
-
-export default function LoginScreen({ navigation }: { navigation: LoginScreenNavigation }) {
+export default function LoginScreen({ navigation }: any) {
   const { user, loading } = useAuth();
-
-  const [request, response, promptAsync] = Google.useAuthRequest({
-    androidClientId: '547765500925-vui262islf9v2qeu8i6npmf6mrkht4sa.apps.googleusercontent.com',
-    iosClientId: '547765500925-j369c2rl2gmlg2gb38b6cpv00p6oiivh.apps.googleusercontent.com',
-    webClientId: '547765500925-c5dc9i5no2s5kse060kh48fbagtg4vrm.apps.googleusercontent.com',
-    redirectUri: 'conectate://redirect', // bate com "scheme" do app.json
-  });
+  const [email, setEmail] = useState('');
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (response?.type === 'success') {
-      const { id_token } = response.params as any;
-      const credential = GoogleAuthProvider.credential(id_token);
-      signInWithCredential(auth, credential).catch(console.error);
+    if (!loading && user) {
+      navigation.replace('Interests');
     }
-  }, [response]);
-
-  useEffect(() => {
-    if (!loading && user) navigation.replace('Interests');
   }, [user, loading]);
 
-  if (loading) return <View style={{ flex:1, alignItems:'center', justifyContent:'center' }}><ActivityIndicator /></View>;
+  const ensureUserDoc = async (uid: string) => {
+    const ref = doc(db, 'users', uid);
+    await setDoc(ref, {
+      createdAt: serverTimestamp(),
+      interests: [],
+      nickname: null,
+      avatar: null,
+      online: true,
+    }, { merge: true });
+  };
+
+  const handleSignUpOrIn = async () => {
+    if (!email || !pass) return Alert.alert('Dados em falta', 'Introduz email e password.');
+    setBusy(true);
+    try {
+      // tenta criar; se já existir, faz login
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+        await ensureUserDoc(cred.user.uid);
+      } catch {
+        const cred = await signInWithEmailAndPassword(auth, email.trim(), pass);
+        await ensureUserDoc(cred.user.uid);
+      }
+    } catch (e: any) {
+      Alert.alert('Erro', e?.message ?? 'Falha na autenticação.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAnon = async () => {
+    setBusy(true);
+    try {
+      const cred = await signInAnonymously(auth);
+      await ensureUserDoc(cred.user.uid);
+    } catch (e: any) {
+      Alert.alert('Erro', e?.message ?? 'Falha no login anónimo.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (loading) {
+    return <View style={{ flex:1, alignItems:'center', justifyContent:'center' }}><ActivityIndicator /></View>;
+  }
 
   return (
-    <View style={{ flex:1, alignItems:'center', justifyContent:'center', gap:12 }}>
-      <Text style={{ fontSize:24, fontWeight:'700' }}>Conecta-te</Text>
+    <View style={{ flex:1, padding:24, gap:16, justifyContent:'center' }}>
+      <Text style={{ fontSize:28, fontWeight:'800', textAlign:'center' }}>Conecta‑te</Text>
+
+      <TextInput
+        placeholder="Email"
+        autoCapitalize="none"
+        keyboardType="email-address"
+        value={email}
+        onChangeText={setEmail}
+        style={{ borderWidth:1, borderColor:'#ddd', borderRadius:10, padding:12 }}
+      />
+      <TextInput
+        placeholder="Password"
+        secureTextEntry
+        value={pass}
+        onChangeText={setPass}
+        style={{ borderWidth:1, borderColor:'#ddd', borderRadius:10, padding:12 }}
+      />
 
       <TouchableOpacity
-        onPress={() => promptAsync()}
-        style={{ padding:12, backgroundColor:'#4285F4', borderRadius:8 }}
-        disabled={!request}
+        onPress={handleSignUpOrIn}
+        disabled={busy}
+        style={{ backgroundColor:'#111', padding:14, borderRadius:10, alignItems:'center' }}
       >
-        <Text style={{ color:'#fff', fontWeight:'600' }}>Entrar com Google</Text>
+        <Text style={{ color:'#fff', fontWeight:'700' }}>{busy ? 'Aguarda…' : 'Entrar / Criar conta'}</Text>
       </TouchableOpacity>
 
-      {/* Email básico – útil enquanto testas */}
       <TouchableOpacity
-        onPress={async () => {
-          try {
-            await createUserWithEmailAndPassword(auth, 'teste@exemplo.com', '123456');
-          } catch {
-            await signInWithEmailAndPassword(auth, 'teste@exemplo.com', '123456');
-          }
-        }}
-        style={{ padding:12, backgroundColor:'#111', borderRadius:8 }}
+        onPress={handleAnon}
+        disabled={busy}
+        style={{ backgroundColor:'#888', padding:12, borderRadius:10, alignItems:'center' }}
       >
-        <Text style={{ color:'#fff' }}>Entrar rápido (Email de teste)</Text>
+        <Text style={{ color:'#fff' }}>Entrar como convidado</Text>
       </TouchableOpacity>
+
+      <Text style={{ textAlign:'center', color:'#666', marginTop:8 }}>
+        Podes começar como convidado e escolher os interesses já a seguir.
+      </Text>
     </View>
   );
 }

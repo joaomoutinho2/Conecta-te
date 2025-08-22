@@ -15,7 +15,10 @@
     },
     "ios": {
       "bundleIdentifier": "pt.joaomoutinho.conectate",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "pt.joaomoutinho.conectate",
