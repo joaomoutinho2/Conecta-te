@@ -44,10 +44,26 @@ export default function LoginScreen() {
   const handleAnon = async () => {
     setBusy(true);
     try {
+      // tenta anónimo normal
       const cred = await signInAnonymously(auth);
       await ensureUserDoc(cred.user.uid);
+      await setDoc(doc(db, 'users', cred.user.uid), { isGuest: true }, { merge: true });
     } catch (e: any) {
-      Alert.alert('Erro', e?.message ?? 'Falha no login anónimo.');
+      // fallback: convidado via email temporário
+      if (e?.code === 'auth/admin-restricted-operation') {
+        try {
+          const rand = Math.random().toString(36).slice(2, 10);
+          const email = `guest_${Date.now()}_${rand}@conectate.app`;
+          const pwd = `G_${rand}_${Date.now()}`;
+          const cred = await createUserWithEmailAndPassword(auth, email, pwd);
+          await ensureUserDoc(cred.user.uid);
+          await setDoc(doc(db, 'users', cred.user.uid), { isGuest: true }, { merge: true });
+        } catch (err: any) {
+          Alert.alert('Erro', err?.message ?? 'Falha no modo convidado.');
+        }
+      } else {
+        Alert.alert('Erro', e?.message ?? 'Falha no login anónimo.');
+      }
     } finally {
       setBusy(false);
     }
