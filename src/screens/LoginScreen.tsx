@@ -1,21 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signInAnonymously } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
 import { useAuth } from '../context/AuthContext';
 
-export default function LoginScreen({ navigation }: any) {
-  const { user, loading } = useAuth();
+export default function LoginScreen() {
+  const { loading } = useAuth();
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!loading && user) {
-      navigation.replace('Interests');
-    }
-  }, [user, loading]);
 
   const ensureUserDoc = async (uid: string) => {
     const ref = doc(db, 'users', uid);
