@@ -14,11 +14,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "bundleIdentifier": "pt.seu.bundle.conectate",
+      "bundleIdentifier": "pt.joaomoutinho.conectate",
       "supportsTablet": true
     },
     "android": {
-      "package": "pt.seu.bundle.conectate",
+      "package": "pt.joaomoutinho.conectate",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
