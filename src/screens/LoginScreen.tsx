@@ -3,12 +3,16 @@ import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { GoogleAuthProvider, signInWithCredential, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { auth } from '../services/firebase';
 import { useAuth } from '../context/AuthContext';
+import { RootStackParamList } from '../navigation/RootNavigator';
 
 WebBrowser.maybeCompleteAuthSession();
 
-export default function LoginScreen({ navigation }: any) {
+type LoginScreenNavigation = NativeStackNavigationProp<RootStackParamList, 'Login'>;
+
+export default function LoginScreen({ navigation }: { navigation: LoginScreenNavigation }) {
   const { user, loading } = useAuth();
 
   const [request, response, promptAsync] = Google.useAuthRequest({
