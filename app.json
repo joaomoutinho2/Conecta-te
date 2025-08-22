@@ -2,6 +2,7 @@
   "expo": {
     "name": "conecta-te",
     "slug": "conecta-te",
+    "scheme": "conectate",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,9 +14,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "bundleIdentifier": "pt.seu.bundle.conectate",
       "supportsTablet": true
     },
     "android": {
+      "package": "pt.seu.bundle.conectate",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -24,6 +27,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1714b4fa-ab1f-43d0-b684-53830107328c"
+      }
     }
   }
 }
