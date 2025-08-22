@@ -1,9 +1,9 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
-import RootNavigator from '@/navigation/RootNavigator';
+import RootNavigator from './src/navigation/RootNavigator';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView, StyleSheet } from 'react-native';
-import { AuthProvider } from '@/context/AuthContext';
+import { AuthProvider } from './src/context/AuthContext';
 
 export default function App() {
   return (
