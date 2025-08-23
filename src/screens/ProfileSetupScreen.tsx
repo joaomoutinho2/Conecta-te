@@ -65,7 +65,6 @@ export default function ProfileSetupScreen({ navigation }: any) {
       return Alert.alert('Permissão', 'Autoriza o acesso às fotos para continuares.');
     }
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType.Images,
       allowsEditing: true,
       quality: 1,
       aspect: [1, 1],
