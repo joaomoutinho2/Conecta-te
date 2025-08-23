@@ -54,14 +54,15 @@ export default function MatchScreen({ navigation }: any) {
       }
 
       // 4) criar (ou usar) o match
-      const mid = deterministicMatchId(uid, best.uid);
+      const { uid: bestUid, shared: bestShared } = best;
+      const mid = deterministicMatchId(uid, bestUid);
       const mref = doc(db, 'matches', mid);
       const exists = await getDoc(mref);
       if (!exists.exists()) {
         await setDoc(mref, {
-          participants: [uid, best.uid],
-          sharedInterests: best.shared,
-          unlocked: { [uid]: false, [best.uid]: false },
+          participants: [uid, bestUid],
+          sharedInterests: bestShared,
+          unlocked: { [uid]: false, [bestUid]: false },
           createdAt: serverTimestamp(),
           mode: '1to1'
         });
