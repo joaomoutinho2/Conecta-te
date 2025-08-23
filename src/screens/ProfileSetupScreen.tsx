@@ -6,11 +6,12 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as FileSystem from 'expo-file-system';
 import { auth, db, storage } from '../services/firebase';
 import {
   doc, getDoc, runTransaction, serverTimestamp
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 
 // ---------- helpers ----------
 const sanitizeUsername = (s: string) =>
@@ -25,10 +26,6 @@ const randomNickname = () => {
   const n = Math.floor(Math.random() * 90) + 10;
   return `${b}${a}${n}`;
 };
-
-// compat: usa MediaType se existir; senão MediaTypeOptions (SDKs mais antigos)
-const PICKER_MEDIA_IMAGES: any =
-  (ImagePicker as any).MediaType?.Images ?? ImagePicker.MediaTypeOptions.Images;
 
 export default function ProfileSetupScreen({ navigation }: any) {
   const uid = auth.currentUser?.uid!;
@@ -61,14 +58,14 @@ export default function ProfileSetupScreen({ navigation }: any) {
     })();
   }, [uid, navigation]);
 
-  // Image picker (API compatível)
+  // Image picker (expo-image-picker v16+)
   const pickImage = async (setter: (u: string) => void) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       return Alert.alert('Permissão', 'Autoriza o acesso às fotos para continuares.');
     }
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: PICKER_MEDIA_IMAGES,
+      mediaTypes: 'images',
       allowsEditing: true,
       quality: 1,
       aspect: [1, 1],
@@ -110,14 +107,17 @@ export default function ProfileSetupScreen({ navigation }: any) {
       [],
       { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
     );
-    // 2) Blob do ficheiro normalizado
-    const resp = await fetch(manip.uri);
-    const blob = await resp.blob(); // type: image/jpeg
+    // 2) Lê ficheiro como base64
+    const base64 = await FileSystem.readAsStringAsync(manip.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
 
     // 3) Upload com metadata
     const path = `users/${uid}/${kind}_${Date.now()}.jpg`;
     const storageRef = ref(storage, path);
-    await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+    await uploadString(storageRef, base64, 'base64', {
+      contentType: 'image/jpeg',
+    });
     return await getDownloadURL(storageRef);
   };
 
