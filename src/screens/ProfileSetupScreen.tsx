@@ -106,15 +106,12 @@ export default function ProfileSetupScreen({ navigation }: any) {
       [],
       { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
     );
-    // 2) Lê ficheiro como base64
-    const base64 = await FileSystem.readAsStringAsync(manip.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+
 
     // 3) Upload com metadata
     const path = `users/${uid}/${kind}_${Date.now()}.jpg`;
     const storageRef = ref(storage, path);
-    await uploadString(storageRef, base64, 'base64', {
+
       contentType: 'image/jpeg',
     });
     return await getDownloadURL(storageRef);
