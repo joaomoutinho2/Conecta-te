@@ -6,12 +6,11 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system';
 import { auth, db, storage } from '../services/firebase';
 import {
   doc, getDoc, runTransaction, serverTimestamp
 } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // ---------- helpers ----------
 const sanitizeUsername = (s: string) =>
@@ -65,7 +64,7 @@ export default function ProfileSetupScreen({ navigation }: any) {
       return Alert.alert('Permissão', 'Autoriza o acesso às fotos para continuares.');
     }
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: 'images',
+      mediaTypes: ImagePicker.MediaType.Images,
       allowsEditing: true,
       quality: 1,
       aspect: [1, 1],
@@ -107,15 +106,14 @@ export default function ProfileSetupScreen({ navigation }: any) {
       [],
       { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
     );
-    // 2) Lê ficheiro como base64
-    const base64 = await FileSystem.readAsStringAsync(manip.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    // 2) Converte para Blob
+    const response = await fetch(manip.uri);
+    const blob = await response.blob();
 
     // 3) Upload com metadata
     const path = `users/${uid}/${kind}_${Date.now()}.jpg`;
     const storageRef = ref(storage, path);
-    await uploadString(storageRef, base64, 'base64', {
+    await uploadBytes(storageRef, blob, {
       contentType: 'image/jpeg',
     });
     return await getDownloadURL(storageRef);
