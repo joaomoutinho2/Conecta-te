@@ -6,16 +6,13 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system';
 import { auth, db, storage } from '../services/firebase';
-import {
-  doc, getDoc, runTransaction, serverTimestamp
-} from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { doc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // ---------- helpers ----------
 const sanitizeUsername = (s: string) =>
-  s.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20); // minúsculas + [a-z0-9_], máx. 20
+  s.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20);
 const isValidUsername = (u: string) => /^[a-z0-9_]{3,20}$/.test(u);
 const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 const randomNickname = () => {
@@ -26,6 +23,9 @@ const randomNickname = () => {
   const n = Math.floor(Math.random() * 90) + 10;
   return `${b}${a}${n}`;
 };
+// compat picker (SDKs antigos)
+const PICKER_MEDIA_IMAGES: any =
+  (ImagePicker as any).MediaType?.Images ?? ImagePicker.MediaTypeOptions.Images;
 
 export default function ProfileSetupScreen({ navigation }: any) {
   const uid = auth.currentUser?.uid!;
@@ -58,13 +58,14 @@ export default function ProfileSetupScreen({ navigation }: any) {
     })();
   }, [uid, navigation]);
 
-  // Image picker (expo-image-picker v16+)
+  // Image picker
   const pickImage = async (setter: (u: string) => void) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       return Alert.alert('Permissão', 'Autoriza o acesso às fotos para continuares.');
     }
     const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: PICKER_MEDIA_IMAGES,
       allowsEditing: true,
       quality: 1,
       aspect: [1, 1],
@@ -72,7 +73,7 @@ export default function ProfileSetupScreen({ navigation }: any) {
     if (!res.canceled && res.assets?.[0]?.uri) setter(res.assets[0].uri);
   };
 
-  // Debounce 400ms para verificar disponibilidade
+  // Debounce 400ms p/ verificar disponibilidade do username
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const uname = username.trim().toLowerCase();
@@ -98,22 +99,28 @@ export default function ProfileSetupScreen({ navigation }: any) {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [username]);
 
-  // Upload normalizado: converte para JPEG + metadata
+  // ---------- Upload via Blob + uploadBytes (sem ArrayBuffer) ----------
   const upload = async (localUri: string, kind: 'avatar' | 'profile') => {
-    // 1) Normaliza para JPEG (resolve URIs PHAsset no iOS e define contentType)
+    // 1) Redimensiona/exporta para JPEG (sem pedir base64)
     const manip = await ImageManipulator.manipulateAsync(
       localUri,
-      [],
-      { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+      [{ resize: { width: 800 } }],
+      {
+        compress: 0.82,
+        format: ImageManipulator.SaveFormat.JPEG,
+      }
     );
 
+    // 2) Transforma a URI (file:// / assets-library:// / blob:) em Blob
+    //    Usar fetch(manip.uri) é a solução compatível com Expo/RN.
+    const resp = await fetch(manip.uri);
+    const blob = await resp.blob();
 
-    // 3) Upload com metadata
+    // 3) Envia com uploadBytes
     const path = `users/${uid}/${kind}_${Date.now()}.jpg`;
     const storageRef = ref(storage, path);
-
-      contentType: 'image/jpeg',
-    });
+    await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+    // 4) URL público
     return await getDownloadURL(storageRef);
   };
 
@@ -130,7 +137,7 @@ export default function ProfileSetupScreen({ navigation }: any) {
     const unameClean = username.trim().toLowerCase();
 
     try {
-      // 1) Pré-check transacional (evita upload se já ocupado)
+      // 1) Pré-check transacional (não gastar dados se já ocupado)
       await runTransaction(db, async (tx) => {
         const unameRef = doc(db, 'usernames', unameClean);
         const current = await tx.get(unameRef);
@@ -169,11 +176,10 @@ export default function ProfileSetupScreen({ navigation }: any) {
       Alert.alert('Perfil criado!', 'Agora escolhe os teus interesses.');
       navigation.replace('Interests');
     } catch (e: any) {
-      const extra = e?.serverResponse || e?.customData?.serverResponse;
-      Alert.alert('Erro', extra ? `${e.message}\n\n${extra}` : (e?.message || 'Falha no upload / gravação.'));
-    } finally {
       setBusy(false);
+      return Alert.alert('Erro', e?.message || 'Falha no upload / gravação.');
     }
+    setBusy(false);
   };
 
   return (
