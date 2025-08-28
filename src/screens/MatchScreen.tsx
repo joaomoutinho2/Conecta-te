@@ -142,21 +142,23 @@ export default function MatchScreen({ navigation }: any) {
         return;
       }
 
-      const candidates: Candidate[] = [];
-      for (const d of qs.docs) {
-        const otherUid = d.id;
-        if (otherUid === uid) continue;
+      const candidates = (
+        await Promise.all(
+          qs.docs.map(async (d) => {
+            const otherUid = d.id;
+            if (otherUid === uid) return null;
 
-        const userSnap = await getDoc(doc(db, 'users', otherUid));
-        if (!userSnap.exists()) continue;
+            const userSnap = await getDoc(doc(db, 'users', otherUid));
+            if (!userSnap.exists()) return null;
 
-        const profile = userSnap.data() as UserDoc;
+            const profile = userSnap.data() as UserDoc;
+            const { shared, score } = scoreCandidate(me, profile);
+            if (shared.length === 0) return null;
 
-        const { shared, score } = scoreCandidate(me, profile);
-        if (shared.length === 0) continue;
-
-        candidates.push({ uid: otherUid, shared, score, profile });
-      }
+            return { uid: otherUid, shared, score, profile } as Candidate;
+          })
+        )
+      ).filter(Boolean) as Candidate[];
 
       candidates.sort((a, b) => b.score - a.score);
       setCandidate(candidates[0] || null);
