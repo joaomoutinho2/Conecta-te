@@ -1,6 +1,16 @@
 // src/screens/MatchScreen.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, Alert, SafeAreaView, Image, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  SafeAreaView,
+  Image,
+  ScrollView,
+  InteractionManager,
+} from 'react-native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../services/firebase';
@@ -74,34 +84,38 @@ export default function MatchScreen({ navigation }: any) {
   useEffect(() => {
     if (!uid) return;
     let unsub: any;
-
-    (async () => {
-      try {
-        unsub = onSnapshot(doc(db, 'users', uid), async (snap) => {
-          const data = (snap.exists() ? (snap.data() as UserDoc) : null);
-          setMe(data);
-          // atualizar /match_queue/{uid}
-          if (data?.interests?.length) {
-            const qRef = doc(db, 'match_queue', uid);
-            await setDoc(
-              qRef,
-              {
-                status: 'waiting',
-                interests: data.interests.slice(0, MAX_INTERESTS_MATCH),
-                ts: serverTimestamp(),
-              } as QueueDoc,
-              { merge: true }
-            );
-          }
+    const task = InteractionManager.runAfterInteractions(() => {
+      (async () => {
+        try {
+          unsub = onSnapshot(doc(db, 'users', uid), async (snap) => {
+            const data = (snap.exists() ? (snap.data() as UserDoc) : null);
+            setMe(data);
+            // atualizar /match_queue/{uid}
+            if (data?.interests?.length) {
+              const qRef = doc(db, 'match_queue', uid);
+              await setDoc(
+                qRef,
+                {
+                  status: 'waiting',
+                  interests: data.interests.slice(0, MAX_INTERESTS_MATCH),
+                  ts: serverTimestamp(),
+                } as QueueDoc,
+                { merge: true }
+              );
+            }
+            setLoading(false);
+          });
+        } catch (e) {
+          console.error('[match:init]', e);
           setLoading(false);
-        });
-      } catch (e) {
-        console.error('[match:init]', e);
-        setLoading(false);
-      }
-    })();
+        }
+      })();
+    });
 
-    return () => unsub && unsub();
+    return () => {
+      task.cancel();
+      unsub && unsub();
+    };
   }, [uid]);
 
   // pontuação de afinidade simples (nº de interesses em comum, desempate por idade próxima se existir)
