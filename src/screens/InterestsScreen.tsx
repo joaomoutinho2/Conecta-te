@@ -51,6 +51,34 @@ type AppConfig = {
   maxInterests?: number;
 };
 
+const Chip = React.memo(function Chip({
+  active,
+  label,
+  onPress,
+}: {
+  active?: boolean;
+  label: string;
+  onPress?: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={{
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: active ? COLORS.brand : COLORS.border,
+        backgroundColor: active ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.04)',
+        marginRight: 8,
+        marginBottom: 8,
+      }}
+    >
+      <Text style={{ color: active ? '#fff' : COLORS.text, fontWeight: '700', fontSize: 12 }}>#{label}</Text>
+    </TouchableOpacity>
+  );
+});
+
 export default function InterestsScreen({ navigation }: any) {
   const uid = auth.currentUser?.uid!;
   const tabBarHeight = useBottomTabBarHeight();
@@ -91,27 +119,35 @@ export default function InterestsScreen({ navigation }: any) {
     return A.some((v, i) => v !== B[i]);
   }, [selected, initialSelected]);
 
-  const categories = useMemo<string[]>(() => {
-    const s = new Set<string>(['Todos']);
-    items.forEach((i) => s.add(i.cat));
-    return Array.from(s);
+  const itemsByCat = useMemo(() => {
+    const map = new Map<string, Interest[]>();
+    items.forEach((i) => {
+      if (!map.has(i.cat)) map.set(i.cat, []);
+      map.get(i.cat)!.push(i);
+    });
+    return map;
   }, [items]);
+
+  const categories = useMemo<string[]>(() => ['Todos', ...Array.from(itemsByCat.keys())], [itemsByCat]);
 
   const filtered = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((i) => i.name.toLowerCase().includes(q));
-  }, [items, debouncedSearch]);
+    const base = cat === 'Todos' ? items : itemsByCat.get(cat) ?? [];
+    if (!q) return base;
+    return base.filter((i) => i.name.toLowerCase().includes(q));
+  }, [items, itemsByCat, cat, debouncedSearch]);
+
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
 
   const renderItem = useCallback(
     ({ item }: { item: Interest }) => (
       <InterestChip
         label={item.name}
-        active={selected.includes(item.id)}
+        active={selectedSet.has(item.id)}
         onPress={() => toggle(item.id)}
       />
     ),
-    [selected, toggle]
+    [selectedSet, toggle]
   );
 
   const keyExtractor = useCallback((i:any) => i.id, []);
@@ -213,23 +249,6 @@ export default function InterestsScreen({ navigation }: any) {
   }, [uid, changed, selected]);
 
   // ---------- UI ----------
-  const Chip = ({ active, label, onPress }: { active?: boolean; label: string; onPress?: () => void }) => (
-    <TouchableOpacity
-      onPress={onPress}
-      style={{
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: active ? COLORS.brand : COLORS.border,
-        backgroundColor: active ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.04)',
-        marginRight: 8,
-        marginBottom: 8,
-      }}
-    >
-      <Text style={{ color: active ? '#fff' : COLORS.text, fontWeight: '700', fontSize: 12 }}>#{label}</Text>
-    </TouchableOpacity>
-  );
 
   if (loading) {
     return (
