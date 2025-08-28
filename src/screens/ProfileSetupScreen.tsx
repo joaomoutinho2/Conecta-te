@@ -61,6 +61,8 @@ type RouteParams = {
   onDone?: string; // nome da rota para navegar quando concluir (opcional)
 };
 
+const DEFAULT_MAX_INTERESTS = 5;
+
 export default function ProfileSetupScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute();
@@ -82,7 +84,7 @@ export default function ProfileSetupScreen() {
   const [avatarRemote, setAvatarRemote] = useState<string | null>(null);
 
   // interesses (quick pick)
-  const [maxInterests, setMaxInterests] = useState<number>(5);
+  const [maxInterests, setMaxInterests] = useState<number>(DEFAULT_MAX_INTERESTS);
   const [selected, setSelected] = useState<string[]>([]);
   const quickInterests = useMemo<Interest[]>(
     () => INTERESTS_SEED.slice(0, 24),
@@ -209,10 +211,14 @@ export default function ProfileSetupScreen() {
     (async () => {
       try {
         // maxInterests (config opcional)
+        let max = DEFAULT_MAX_INTERESTS;
         try {
           const cfg = await getDoc(doc(db, 'app_config', 'general'));
           const data = (cfg.exists() ? (cfg.data() as AppConfig) : {}) || {};
-          if (typeof data.maxInterests === 'number') setMaxInterests(data.maxInterests);
+          if (typeof data.maxInterests === 'number') {
+            max = data.maxInterests;
+            setMaxInterests(data.maxInterests);
+          }
         } catch (_) {}
 
         const userRef = doc(db, 'users', uid);
@@ -233,7 +239,7 @@ export default function ProfileSetupScreen() {
           setBio(u.bio || '');
           setProfileRemote(u.profilePhoto || null);
           setAvatarRemote(u.avatar || null);
-          setSelected(Array.isArray(u.interests) ? u.interests.slice(0, maxInterests) : []);
+          setSelected(Array.isArray(u.interests) ? u.interests.slice(0, max) : []);
         } else {
           // valores default
           setNickname(randomNickname());
@@ -249,7 +255,7 @@ export default function ProfileSetupScreen() {
     return () => {
       mount = false;
     };
-  }, [uid, maxInterests]);
+  }, [uid]);
 
   // ---------- upload helper ----------
   const uploadToStorage = useCallback(async (localUri: string, remotePath: string) => {
