@@ -1,6 +1,10 @@
 // src/services/firebase.ts
 import { initializeApp, getApps } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, initializeAuth } from 'firebase/auth';
+// Firebase v12 RN persistence util not typed/exported correctly
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { getReactNativePersistence } from 'firebase/auth';
 import {
   initializeFirestore,
   persistentLocalCache,
@@ -10,6 +14,7 @@ import {
 import { getStorage } from 'firebase/storage';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type FirebaseExtra = {
   apiKey: string;
@@ -26,22 +31,20 @@ if (!cfg?.apiKey) {
 }
 
 export const app = getApps().length ? getApps()[0] : initializeApp(cfg);
-export const auth = getAuth(app);
+export const auth =
+  Platform.OS === 'web'
+    ? getAuth(app)
+    : initializeAuth(app, {
+        persistence: getReactNativePersistence(AsyncStorage),
+      });
 
-// Firestore com cache local persistente (arranques/leitura bem mais rápidos).
-// Em Android + DEV, alguns ambientes precisam de long-polling para ficar estável.
-let _db: ReturnType<typeof initializeFirestore>;
-try {
-  _db = initializeFirestore(app, {
-    localCache: persistentLocalCache(),
-    ...(Platform.OS === 'android' && __DEV__ ? { experimentalForceLongPolling: true, useFetchStreams: false } : {}),
-  } as any);
-} catch {
-  // fallback para memória (não persiste entre arranques)
-  _db = initializeFirestore(app, {
-    localCache: memoryLocalCache(),
-  } as any);
-}
+// Firestore com cache local persistente quando suportado.
+// Em ambientes nativos, force long polling para estabilizar a ligação.
+const isWeb = Platform.OS === 'web';
+const _db = initializeFirestore(app, {
+  localCache: isWeb ? persistentLocalCache() : memoryLocalCache(),
+  ...(isWeb ? {} : { experimentalForceLongPolling: true, useFetchStreams: false }),
+} as any);
 
 // Reduz verbosidade de logs (menos custo no bridge)
 setLogLevel(__DEV__ ? 'warn' : 'error');
