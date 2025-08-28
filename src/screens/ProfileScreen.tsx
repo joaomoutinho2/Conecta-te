@@ -209,13 +209,25 @@ export default function ProfileScreen() {
       let profileUrl = profileRemote || null;
       let avatarUrl = avatarRemote || null;
 
+      const uploads: Promise<void>[] = [];
       if (profileLocal) {
         const path = `users/${uid}/profile_${Date.now()}.jpg`;
-        profileUrl = await uploadToStorage(profileLocal, path);
+        uploads.push(
+          uploadToStorage(profileLocal, path).then((url) => {
+            profileUrl = url;
+          })
+        );
       }
       if (avatarLocal) {
         const path = `users/${uid}/avatar_${Date.now()}.jpg`;
-        avatarUrl = await uploadToStorage(avatarLocal, path);
+        uploads.push(
+          uploadToStorage(avatarLocal, path).then((url) => {
+            avatarUrl = url;
+          })
+        );
+      }
+      if (uploads.length) {
+        await Promise.all(uploads);
       }
 
       await setDoc(
