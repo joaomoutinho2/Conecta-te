@@ -9,6 +9,7 @@ import {
   ViewStyle,
   TextStyle,
 } from 'react-native';
+import { COLORS } from '../utils/colors';
 
 type Size = 'sm' | 'md';
 
@@ -85,12 +86,6 @@ function InterestChip({
 }
 
 export default React.memo(InterestChip);
-
-const COLORS = {
-  text: '#e5e7eb',
-  border: 'rgba(255,255,255,0.15)',
-  brand: '#7c3aed',
-};
 
 const styles = StyleSheet.create({
   base: {

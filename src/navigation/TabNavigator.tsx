@@ -11,14 +11,7 @@ import ProfileScreen from '../screens/ProfileScreen';
 import { useAuth } from '../context/AuthContext';
 import { db } from '../services/firebase';
 import { collection, onSnapshot, orderBy, query, where, limit } from 'firebase/firestore';
-
-const COLORS = {
-  bg: '#0f172a',
-  text: '#e5e7eb',
-  sub: '#9ca3af',
-  border: 'rgba(255,255,255,0.15)',
-  brand: '#7c3aed',
-};
+import { COLORS } from '../utils/colors';
 
 const Tab = createBottomTabNavigator();
 

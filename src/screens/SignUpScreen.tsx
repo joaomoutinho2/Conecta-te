@@ -5,12 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth, db } from '../services/firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-
-const COLORS = {
-  bg1: '#0f172a', bg2: '#111827', brandA: '#7c3aed',
-  card: 'rgba(255,255,255,0.06)', text: '#e5e7eb', sub: '#9ca3af',
-  error: '#fb7185', input: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.15)', white: '#fff',
-};
+import { COLORS } from '../utils/colors';
 
 const isValidEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 const pwOK = (p: string) => p.length >= 6;
@@ -127,7 +122,7 @@ export default function SignUpScreen({ navigation }: any) {
                 <TouchableOpacity
                   onPress={handleCreate}
                   disabled={!(emailOk && passOk && confirmOk) || busy}
-                  style={{ backgroundColor: (!(emailOk && passOk && confirmOk) || busy) ? 'rgba(255,255,255,0.25)' : COLORS.brandA, paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 16 }}
+                  style={{ backgroundColor: (!(emailOk && passOk && confirmOk) || busy) ? 'rgba(255,255,255,0.25)' : COLORS.brand, paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 16 }}
                 >
                   {busy ? <ActivityIndicator color={COLORS.white} /> : <Text style={{ color: COLORS.white, fontWeight: '800' }}>Criar conta</Text>}
                 </TouchableOpacity>

@@ -9,12 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../services/firebase';
 import { useAuth } from '../context/AuthContext';
-
-const COLORS = {
-  bg1: '#0f172a', bg2: '#111827', brandA: '#7c3aed',
-  card: 'rgba(255,255,255,0.06)', text: '#e5e7eb', sub: '#9ca3af',
-  error: '#fb7185', input: 'rgba(255,255,255,0.08)', border: 'rgba(255,255,255,0.15)', white: '#fff',
-};
+import { COLORS } from '../utils/colors';
 
 const isValidEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
@@ -109,7 +104,7 @@ export default function LoginScreen({ navigation }: any) {
                 <TouchableOpacity
                   onPress={handleLogin}
                   disabled={!canLogin || busy}
-                  style={{ backgroundColor: (!canLogin || busy) ? '#3f3f46' : COLORS.brandA, paddingVertical: 14, borderRadius: 12, alignItems: 'center' }}
+                  style={{ backgroundColor: (!canLogin || busy) ? '#3f3f46' : COLORS.brand, paddingVertical: 14, borderRadius: 12, alignItems: 'center' }}
                 >
                   {busy ? <ActivityIndicator color={COLORS.white} /> : <Text style={{ color: COLORS.white, fontWeight: '800' }}>Entrar</Text>}
                 </TouchableOpacity>
