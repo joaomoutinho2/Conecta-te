@@ -18,6 +18,7 @@ import {
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../services/firebase';
+import useNetwork from '../hooks/useNetwork';
 import {
   addDoc,
   collection,
@@ -81,6 +82,7 @@ export default function ChatScreen() {
   const { mid, otherUid } = (route.params || {}) as RouteParams;
 
   const uid = auth.currentUser?.uid!;
+  const { isConnected } = useNetwork(db);
   const listRef = useRef<FlatList<Msg>>(null);
 
   const [loading, setLoading] = useState(true);
@@ -358,7 +360,11 @@ export default function ChatScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
       {Header}
-
+      {!isConnected && (
+        <View style={{ backgroundColor: COLORS.error, padding: 8 }}>
+          <Text style={{ color: '#fff', textAlign: 'center' }}>Sem ligação à internet</Text>
+        </View>
+      )}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.select({ ios: 'padding', android: undefined })}

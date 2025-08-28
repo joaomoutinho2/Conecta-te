@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import InterestChip from './InterestsChip';
 import useDebouncedValue from '../hooks/useDebouncedValue';
+import useNetwork from '../hooks/useNetwork';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../services/firebase';
@@ -82,6 +83,7 @@ const Chip = React.memo(function Chip({
 export default function InterestsScreen({ navigation }: any) {
   const uid = auth.currentUser?.uid!;
   const tabBarHeight = useBottomTabBarHeight();
+  const { isConnected } = useNetwork(db);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -283,6 +285,11 @@ export default function InterestsScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
+      {!isConnected && (
+        <View style={{ backgroundColor: COLORS.danger, padding: 8 }}>
+          <Text style={{ color: '#fff', textAlign: 'center' }}>Sem ligação à internet</Text>
+        </View>
+      )}
       <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: tabBarHeight + 24, flex: 1 }}>
         {/* header */}
         <View style={{ paddingBottom: 12, borderBottomWidth: 1, borderColor: COLORS.border, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
