@@ -35,3 +35,13 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+
+# 🔒 segurança
+*.jks
+*.keystore
+*.p8
+*.p12
+google-services.json
+GoogleService-Info.plist
+.env*
+credentials.json

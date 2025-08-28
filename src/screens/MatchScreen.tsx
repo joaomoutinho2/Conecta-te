@@ -1,133 +1,328 @@
 // src/screens/MatchScreen.tsx
-import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, Alert, SafeAreaView, Image, ScrollView } from 'react-native';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../services/firebase';
 import {
-  collection, doc, getDoc, getDocs, query, where, limit,
-  setDoc, serverTimestamp
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  runTransaction,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
 } from 'firebase/firestore';
 
-type UserDoc = { nickname?: string; avatar?: string; interests?: string[] };
+type UserDoc = {
+  displayName?: string;
+  nickname?: string;
+  profilePhoto?: string;
+  avatar?: string;
+  bio?: string;
+  age?: number;
+  interests?: string[];
+};
 
-function deterministicMatchId(a: string, b: string) {
-  const [x, y] = [a, b].sort();
-  return `${x}_${y}`;
+type QueueDoc = {
+  status: 'waiting' | 'matched';
+  interests: string[];
+  ts: any; // timestamp
+};
+
+type Candidate = {
+  uid: string;
+  shared: string[];
+  score: number;
+  profile: UserDoc;
+};
+
+const COLORS = {
+  bg: '#0f172a',
+  text: '#e5e7eb',
+  sub: '#9ca3af',
+  border: 'rgba(255,255,255,0.15)',
+  brand: '#7c3aed',
+  card: 'rgba(255,255,255,0.06)',
+  danger: '#fb7185',
+  ok: '#10b981',
+};
+
+const MAX_INTERESTS_MATCH = 10; // para queries com array-contains-any
+const FETCH_LIMIT = 40;         // candidatos por batch
+
+function matchIdFor(a: string, b: string) {
+  return [a, b].sort((x, y) => (x < y ? -1 : 1)).join('_');
 }
 
 export default function MatchScreen({ navigation }: any) {
+  const tabBarHeight = useBottomTabBarHeight();
   const uid = auth.currentUser?.uid!;
-  const [status, setStatus] = useState<'searching' | 'nomatch' | 'ready'>('searching');
-  const [hint, setHint] = useState<string | null>(null);
+  const [me, setMe] = useState<UserDoc | null>(null);
 
-  const findMatch = async () => {
-    if (!uid) { setStatus('nomatch'); setHint('Utilizador não autenticado.'); return; }
-    setStatus('searching'); setHint(null);
+  const [loading, setLoading] = useState(true);
+  const [finding, setFinding] = useState(false);
+  const [candidate, setCandidate] = useState<Candidate | null>(null);
 
+  // 1) Ler o meu perfil e garantir que estou na queue “waiting” com os interesses atualizados
+  useEffect(() => {
+    if (!uid) return;
+    let unsub: any;
+
+    (async () => {
+      try {
+        unsub = onSnapshot(doc(db, 'users', uid), async (snap) => {
+          const data = (snap.exists() ? (snap.data() as UserDoc) : null);
+          setMe(data);
+          // atualizar /match_queue/{uid}
+          if (data?.interests?.length) {
+            const qRef = doc(db, 'match_queue', uid);
+            await setDoc(
+              qRef,
+              {
+                status: 'waiting',
+                interests: data.interests.slice(0, MAX_INTERESTS_MATCH),
+                ts: serverTimestamp(),
+              } as QueueDoc,
+              { merge: true }
+            );
+          }
+          setLoading(false);
+        });
+      } catch (e) {
+        console.error('[match:init]', e);
+        setLoading(false);
+      }
+    })();
+
+    return () => unsub && unsub();
+  }, [uid]);
+
+  // pontuação de afinidade simples (nº de interesses em comum, desempate por idade próxima se existir)
+  const scoreCandidate = useCallback((mine: UserDoc, other: UserDoc) => {
+    const mineSet = new Set(mine.interests || []);
+    const shared = (other.interests || []).filter((i) => mineSet.has(i));
+    let score = shared.length;
+
+    if (typeof mine.age === 'number' && typeof other.age === 'number') {
+      const diff = Math.abs(mine.age - other.age);
+      // bónus pequeno quanto mais próximo
+      score += Math.max(0, 5 - Math.min(5, Math.floor(diff / 2)));
+    }
+
+    return { shared, score };
+  }, []);
+
+  // buscar candidatos “waiting” com interesses em comum e escolher o melhor localmente
+  const fetchBestCandidate = useCallback(async () => {
+    if (!me?.interests?.length) {
+      Alert.alert('Perfil incompleto', 'Escolhe alguns interesses primeiro.');
+      return;
+    }
+    setFinding(true);
     try {
-      // 1) Ler os meus interesses
-      const meSnap = await getDoc(doc(db, 'users', uid));
-      const me = (meSnap.data() || {}) as UserDoc;
-      const myInterests = (me.interests || []).slice(0, 10);
-      if (myInterests.length === 0) {
-        setStatus('nomatch'); setHint('Não tens interesses guardados.');
-        Alert.alert('Interesses em falta', 'Escolhe pelo menos 1 interesse.');
+      const q = query(
+        collection(db, 'match_queue'),
+        where('status', '==', 'waiting'),
+        where('interests', 'array-contains-any', me.interests.slice(0, MAX_INTERESTS_MATCH)),
+        orderBy('ts', 'asc'),
+        limit(FETCH_LIMIT)
+      );
+
+      const qs = await getDocs(q);
+      if (qs.empty) {
+        setCandidate(null);
+        Alert.alert('Sem candidatos agora', 'Volta a tentar em breve.');
         return;
       }
 
-      // 2) Procurar candidatos com pelo menos 1 interesse em comum
-      let candSnap;
-      try {
-        const qUsers = query(
-          collection(db, 'users'),
-          where('interests', 'array-contains-any', myInterests),
-          limit(25)
-        );
-        candSnap = await getDocs(qUsers);
-      } catch (e: any) {
-        if (e?.code === 'permission-denied') {
-          setHint('Rules: em /users/{uid} precisas de allow read para autenticados.');
-        }
-        throw e;
+      const candidates: Candidate[] = [];
+      for (const d of qs.docs) {
+        const otherUid = d.id;
+        if (otherUid === uid) continue;
+
+        const userSnap = await getDoc(doc(db, 'users', otherUid));
+        if (!userSnap.exists()) continue;
+
+        const profile = userSnap.data() as UserDoc;
+
+        const { shared, score } = scoreCandidate(me, profile);
+        if (shared.length === 0) continue;
+
+        candidates.push({ uid: otherUid, shared, score, profile });
       }
 
-      // 3) Escolher o melhor candidato (maior overlap), sem ler outra vez
-      type Best = { uid: string; shared: string[] };
-      let best: Best | undefined;
+      candidates.sort((a, b) => b.score - a.score);
+      setCandidate(candidates[0] || null);
+    } catch (e: any) {
+      console.error('[match:fetch]', e);
+      Alert.alert('Erro', 'Não foi possível procurar candidatos.');
+    } finally {
+      setFinding(false);
+    }
+  }, [me, uid, scoreCandidate]);
 
-      candSnap.forEach((d) => {
-        if (d.id === uid) return;
-        const ints = (d.data().interests || []) as string[];
-        const shared = ints.filter((i) => myInterests.includes(i));
-        if (shared.length > 0 && (!best || shared.length > best.shared.length)) {
-          best = { uid: d.id, shared };
+  // 2) Tentar “reivindicar” e criar o match com transação (evita corridas simples)
+  const startChatWith = useCallback(async (otherUid: string) => {
+    const mid = matchIdFor(uid, otherUid);
+
+    try {
+      setFinding(true);
+      await runTransaction(db, async (tx) => {
+        const qMeRef = doc(db, 'match_queue', uid);
+        const qOtRef = doc(db, 'match_queue', otherUid);
+        const matchRef = doc(db, 'matches', mid);
+
+        const [meQ, otQ, mDoc] = await Promise.all([tx.get(qMeRef), tx.get(qOtRef), tx.get(matchRef)]);
+
+        if (mDoc.exists()) {
+          // já existe match — segue para chat
+          return;
         }
+
+        const meStatus = meQ.exists() ? (meQ.data() as QueueDoc).status : 'waiting';
+        const otStatus = otQ.exists() ? (otQ.data() as QueueDoc).status : 'waiting';
+
+        if (meStatus !== 'waiting' || otStatus !== 'waiting') {
+          throw new Error('Um dos utilizadores já não está disponível.');
+        }
+
+        // criar match
+        tx.set(matchRef, {
+          participants: [uid, otherUid],
+          lastMessageAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+        });
+
+        // marcar ambos como matched (simples; em produção, poderias remover da queue)
+        tx.update(qMeRef, { status: 'matched', ts: serverTimestamp() });
+        tx.update(qOtRef, { status: 'matched', ts: serverTimestamp() });
       });
 
-      if (!best) { setStatus('nomatch'); setHint('Sem candidatos agora.'); return; }
-
-      // 🔒 extraímos para variáveis — evita o erro "never"
-      const bestUid = best.uid;
-      const bestShared = best.shared;
-
-      // 4) Criar (ou reutilizar) o match — sem getDoc antes
-      const mid = deterministicMatchId(uid, bestUid);
-      try {
-        await setDoc(
-          doc(db, 'matches', mid),
-          {
-            participants: [uid, bestUid],
-            sharedInterests: bestShared,
-            unlocked: { [uid]: false, [bestUid]: false },
-            createdAt: serverTimestamp(),
-            mode: '1to1'
-          },
-          { merge: true }
-        );
-      } catch (e: any) {
-        if (e?.code === 'permission-denied') {
-          setHint('Rules: em /matches/{matchId} precisas de allow create para autenticados.');
-        }
-        throw e;
-      }
-
-      setStatus('ready');
-      navigation.replace('Chat', { matchId: mid });
+      // navega para o chat
+      navigation.navigate('Chat', { mid, otherUid });
     } catch (e: any) {
-      console.log('Match error:', e?.code, e?.message);
-      Alert.alert('Erro', e?.message || 'Falha ao procurar match.');
-      setStatus('nomatch');
+      console.error('[match:tx]', e);
+      Alert.alert('Ups', e?.message || 'Não foi possível iniciar conversa.');
+    } finally {
+      setFinding(false);
     }
-  };
+  }, [navigation, uid]);
 
-  useEffect(() => { findMatch(); }, []);
-
-  if (status === 'searching') {
+  const Card = useMemo(() => {
+    if (!candidate) return null;
+    const p = candidate.profile;
+    const photo = p.profilePhoto || p.avatar;
     return (
-      <View style={{ flex:1, alignItems:'center', justifyContent:'center', gap:8, padding:16 }}>
-        <ActivityIndicator />
-        <Text>A procurar alguém com interesses em comum…</Text>
+      <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 16, overflow: 'hidden' }}>
+        {photo ? (
+          <Image source={{ uri: photo }} style={{ width: '100%', height: 220 }} />
+        ) : (
+          <View style={{ width: '100%', height: 220, backgroundColor: '#1f2937' }} />
+        )}
+
+        <View style={{ padding: 14, gap: 8 }}>
+          <Text style={{ color: COLORS.text, fontSize: 18, fontWeight: '800' }}>
+            {p.displayName || p.nickname || 'Utilizador'}
+            {typeof p.age === 'number' ? `, ${p.age}` : ''}
+          </Text>
+          {!!p.bio && <Text style={{ color: COLORS.sub }}>{p.bio}</Text>}
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+            {candidate.shared.slice(0, 6).map((it) => (
+              <View key={it} style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1, borderColor: COLORS.border, backgroundColor: 'rgba(255,255,255,0.04)' }}>
+                <Text style={{ color: COLORS.text, fontSize: 12, fontWeight: '700' }}>#{it}</Text>
+              </View>
+            ))}
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+            <TouchableOpacity
+              onPress={() => setCandidate(null)}
+              style={{ flex: 1, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, padding: 12, borderRadius: 12, alignItems: 'center' }}
+            >
+              <Text style={{ color: COLORS.text, fontWeight: '700' }}>Passar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => startChatWith(candidate.uid)}
+              style={{ flex: 1, backgroundColor: COLORS.brand, borderWidth: 1, borderColor: COLORS.border, padding: 12, borderRadius: 12, alignItems: 'center' }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '800' }}>Iniciar conversa</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
     );
-  }
+  }, [candidate, startChatWith]);
 
-  if (status === 'nomatch') {
+  if (loading) {
     return (
-      <View style={{ flex:1, alignItems:'center', justifyContent:'center', padding:24, gap:12 }}>
-        <Text style={{ fontSize:18, fontWeight:'700', textAlign:'center' }}>Ainda sem matches</Text>
-        {hint ? <Text style={{ color:'#666', textAlign:'center' }}>{hint}</Text> : null}
-        <TouchableOpacity onPress={findMatch} style={{ backgroundColor:'#111', padding:12, borderRadius:10 }}>
-          <Text style={{ color:'#fff', fontWeight:'700' }}>Procurar novamente</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.replace('Interests')} style={{ padding:10 }}>
-          <Text>Alterar interesses</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color="#fff" />
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={{ flex:1, alignItems:'center', justifyContent:'center' }}>
-      <Text>Encontrámos alguém! A abrir chat…</Text>
-    </View>
+    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: tabBarHeight + 24, paddingTop: 12 }}>
+        {/* Header */}
+        <View style={{ paddingBottom: 12, borderBottomWidth: 1, borderColor: COLORS.border, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Ionicons name="sparkles" size={20} color={COLORS.brand} />
+          <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: '800' }}>Encontra pessoas compatíveis</Text>
+        </View>
+
+        {/* Estado do perfil */}
+        {!me?.interests?.length ? (
+          <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, padding: 14, gap: 10 }}>
+            <Text style={{ color: COLORS.sub }}>
+              Para começares, escolhe alguns interesses na aba **Interesses**. Isso ajuda a sugerir-te pessoas com mais afinidade.
+            </Text>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('Interesses')}
+              style={{ backgroundColor: COLORS.brand, borderColor: COLORS.border, borderWidth: 1, padding: 12, borderRadius: 12, alignItems: 'center' }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '800' }}>Escolher interesses</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Controlo de procura */}
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+              <TouchableOpacity
+                onPress={fetchBestCandidate}
+                disabled={finding}
+                style={{ flex: 1, backgroundColor: COLORS.brand, borderWidth: 1, borderColor: COLORS.border, padding: 12, borderRadius: 12, alignItems: 'center' }}
+              >
+                {finding ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '800' }}>Procurar candidato</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setCandidate(null)}
+                style={{ width: 56, backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, padding: 12, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="refresh" size={18} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Cartão do candidato */}
+            {candidate ? (
+              Card
+            ) : (
+              <View style={{ backgroundColor: COLORS.card, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, padding: 14 }}>
+                <Text style={{ color: COLORS.sub }}>
+                  Carrega em <Text style={{ color: COLORS.text, fontWeight: '800' }}>Procurar candidato</Text> para ver uma sugestão com base nos teus interesses.
+                </Text>
+              </View>
+            )}
+          </>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 }

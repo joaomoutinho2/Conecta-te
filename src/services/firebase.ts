@@ -1,24 +1,50 @@
 // src/services/firebase.ts
 import { initializeApp, getApps } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
 import { getAuth } from 'firebase/auth';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  memoryLocalCache,
+  setLogLevel,
+} from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
-const firebaseConfig = {
-  apiKey: 'AIzaSyCdedo1UjNROpFU5v4_3CegqyWFs-HEYKo',
-  authDomain: 'conecta-te-149e7.firebaseapp.com',
-  projectId: 'conecta-te-149e7',
-  storageBucket: 'conecta-te-149e7.firebasestorage.app',
-  messagingSenderId: '547765500925',
-  appId: '1:547765500925:web:b50b1b51560c9fbca1b794',
+type FirebaseExtra = {
+  apiKey: string;
+  authDomain: string;
+  projectId: string;
+  storageBucket: string;
+  messagingSenderId: string;
+  appId: string;
 };
 
-export const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+const cfg = (Constants.expoConfig?.extra as any)?.firebase as FirebaseExtra;
+if (!cfg?.apiKey) {
+  console.warn('[firebase] Missing config from app.json > extra.firebase');
+}
 
-// ✅ Auth para Expo (web e mobile)
+export const app = getApps().length ? getApps()[0] : initializeApp(cfg);
 export const auth = getAuth(app);
 
-export const db = getFirestore(app);
+// Firestore com cache local persistente (arranques/leitura bem mais rápidos).
+// Em Android + DEV, alguns ambientes precisam de long-polling para ficar estável.
+let _db: ReturnType<typeof initializeFirestore>;
+try {
+  _db = initializeFirestore(app, {
+    localCache: persistentLocalCache(),
+    ...(Platform.OS === 'android' && __DEV__ ? { experimentalForceLongPolling: true, useFetchStreams: false } : {}),
+  } as any);
+} catch {
+  // fallback para memória (não persiste entre arranques)
+  _db = initializeFirestore(app, {
+    localCache: memoryLocalCache(),
+  } as any);
+}
 
-// ✅ Usa o bucket do config (podes também passar explicitamente 'gs://conecta-te-149e7.appspot.com' se quiseres)
+// Reduz verbosidade de logs (menos custo no bridge)
+setLogLevel(__DEV__ ? 'warn' : 'error');
+
+export const db = _db;
 export const storage = getStorage(app);

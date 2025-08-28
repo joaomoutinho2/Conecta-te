@@ -34,6 +34,14 @@
     "extra": {
       "eas": {
         "projectId": "1714b4fa-ab1f-43d0-b684-53830107328c"
+      },
+      "firebase": {
+        "apiKey": "AIzaSyCdedo1UjNROpFU5v4_3CegqyWFs-HEYKo",
+        "authDomain": "conecta-te.firebaseapp.com",
+        "projectId": "conecta-te",
+        "storageBucket": "conecta-te.appspot.com",
+        "messagingSenderId": "1234567890",
+        "appId": "1:1234567890:web:abcdefghij"
       }
     }
   }

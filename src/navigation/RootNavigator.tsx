@@ -1,87 +1,82 @@
 // src/navigation/RootNavigator.tsx
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import React from 'react';
+import { ActivityIndicator, SafeAreaView } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useAuth } from '../context/AuthContext';
-import { db } from '../services/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
 
-// screens
+import { useAuth } from '../context/AuthContext';
+import TabNavigator from './TabNavigator';
+
 import LoginScreen from '../screens/LoginScreen';
 import SignUpScreen from '../screens/SignUpScreen';
 import ProfileSetupScreen from '../screens/ProfileSetupScreen';
-import InterestsScreen from '../screens/InterestsScreen';
-import MatchScreen from '../screens/MatchScreen';
 import ChatScreen from '../screens/ChatScreen';
 
-const Stack = createNativeStackNavigator();
+const COLORS = {
+  bg: '#0f172a',
+};
 
-function Splash() {
+type RootStackParamList = {
+  Auth: undefined;
+  Setup: undefined;
+  Tabs: undefined;
+  Chat: { mid: string; otherUid: string };
+};
+
+const Root = createNativeStackNavigator<RootStackParamList>();
+const AuthStack = createNativeStackNavigator();
+const SetupStack = createNativeStackNavigator();
+
+function AuthFlow() {
   return (
-    <View style={{ flex:1, alignItems:'center', justifyContent:'center', backgroundColor:'#111' }}>
-      <ActivityIndicator color="#fff" />
-    </View>
+    <AuthStack.Navigator
+      screenOptions={{ headerShown: false, animation: 'fade' }}
+    >
+      <AuthStack.Screen name="Login" component={LoginScreen} />
+      <AuthStack.Screen name="SignUp" component={SignUpScreen} />
+    </AuthStack.Navigator>
   );
 }
 
-function AuthStack() {
+function SetupFlow() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Login" component={LoginScreen} />
-      <Stack.Screen name="SignUp" component={SignUpScreen} />
-    </Stack.Navigator>
-  );
-}
-
-function SetupStack() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
-    </Stack.Navigator>
-  );
-}
-
-function MainStack() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Interests" component={InterestsScreen} />
-      <Stack.Screen name="Match" component={MatchScreen} />
-      <Stack.Screen name="Chat" component={ChatScreen} />
-    </Stack.Navigator>
+    <SetupStack.Navigator screenOptions={{ headerShown: false }}>
+      <SetupStack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
+    </SetupStack.Navigator>
   );
 }
 
 export default function RootNavigator() {
-  const { user, loading } = useAuth();
-  const [checking, setChecking] = useState(true);
-  const [needsSetup, setNeedsSetup] = useState(false);
+  const { user, profileCompleted, loading } = useAuth();
 
-  useEffect(() => {
-    if (loading) return;
-
-    if (!user) {
-      setNeedsSetup(false);
-      setChecking(false);
-      return;
-    }
-
-    // Observa o doc do utilizador: se profileComplete !== true, obriga a Setup
-    const unsub = onSnapshot(
-      doc(db, 'users', user.uid),
-      (snap) => {
-        const data = snap.data() || {};
-        setNeedsSetup(data?.profileComplete !== true);
-        setChecking(false);
-      },
-      () => setChecking(false)
+  if (loading) {
+    // ecrã de loading simples enquanto determinamos o gate
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color="#fff" />
+      </SafeAreaView>
     );
+  }
 
-    return () => unsub();
-  }, [user, loading]);
-
-  if (loading || checking) return <Splash />;
-
-  if (!user) return <AuthStack />;
-  if (needsSetup) return <SetupStack />;
-  return <MainStack />;
+  return (
+    <Root.Navigator screenOptions={{ headerShown: false }}>
+      {!user ? (
+        // Sem sessão → fluxo de autenticação
+        <Root.Screen name="Auth" component={AuthFlow} />
+      ) : !profileCompleted ? (
+        // Com sessão mas sem perfil completo → fluxo de setup
+        <Root.Screen name="Setup" component={SetupFlow} />
+      ) : (
+        // App principal
+        <>
+          <Root.Screen name="Tabs" component={TabNavigator} />
+          {/* Chat fora das tabs para poder abrir em modal/pilha separada */}
+          <Root.Screen
+            name="Chat"
+            component={ChatScreen}
+            options={{ presentation: 'card', headerShown: false }}
+          />
+        </>
+      )}
+    </Root.Navigator>
+  );
 }

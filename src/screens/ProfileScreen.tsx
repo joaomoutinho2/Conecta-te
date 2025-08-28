@@ -1,4 +1,4 @@
-// src/screens/ProfileSetupScreen.tsx
+// src/screens/ProfileScreen.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
@@ -16,21 +16,25 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { CommonActions, useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 
 import { auth, db, storage } from '../services/firebase';
-import {
-  doc,
-  getDoc,
-  setDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
-import { INTERESTS_SEED, Interest } from '../utils/interestsSeed';
-import { randomNickname, avatarFromNickname } from '../utils/nicknames';
-
-type AppConfig = { maxInterests?: number };
+type UserDoc = {
+  nickname?: string;
+  displayName?: string;
+  email?: string;
+  age?: number;
+  bio?: string;
+  profilePhoto?: string;
+  avatar?: string;
+  interests?: string[];
+  profileCompleted?: boolean;
+  updatedAt?: any;
+};
 
 const COLORS = {
   bg: '#0f172a',
@@ -45,61 +49,35 @@ const COLORS = {
   line: '#233047',
 };
 
-type UserDoc = {
-  nickname?: string;
-  displayName?: string;
-  age?: number;
-  bio?: string;
-  profilePhoto?: string;
-  avatar?: string;
-  interests?: string[];
-  profileCompleted?: boolean;
-};
-
-type RouteParams = {
-  onDone?: string; // nome da rota para navegar quando concluir (opcional)
-};
-
-export default function ProfileSetupScreen() {
+export default function ProfileScreen() {
   const navigation = useNavigation<any>();
-  const route = useRoute();
-  const { onDone } = (route.params || {}) as RouteParams;
-
   const uid = auth.currentUser?.uid!;
+  const email = auth.currentUser?.email ?? '';
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // campos
   const [nickname, setNickname] = useState('');
   const [ageStr, setAgeStr] = useState('');
   const [bio, setBio] = useState('');
 
-  // fotos
-  const [profileLocal, setProfileLocal] = useState<string | null>(null);
-  const [avatarLocal, setAvatarLocal] = useState<string | null>(null);
   const [profileRemote, setProfileRemote] = useState<string | null>(null);
   const [avatarRemote, setAvatarRemote] = useState<string | null>(null);
 
-  // interesses (quick pick)
-  const [maxInterests, setMaxInterests] = useState<number>(5);
-  const [selected, setSelected] = useState<string[]>([]);
-  const quickInterests = useMemo<Interest[]>(
-    () => INTERESTS_SEED.slice(0, 24),
-    []
-  );
-
-  const displayAvatar = useMemo(() => {
-    if (avatarLocal) return { uri: avatarLocal };
-    if (avatarRemote) return { uri: avatarRemote };
-    const nick = nickname?.trim() || 'Conectate';
-    return { uri: avatarFromNickname(nick) };
-  }, [avatarLocal, avatarRemote, nickname]);
+  const [profileLocal, setProfileLocal] = useState<string | null>(null);
+  const [avatarLocal, setAvatarLocal] = useState<string | null>(null);
 
   const displayProfile = useMemo(() => {
     if (profileLocal) return { uri: profileLocal };
     if (profileRemote) return { uri: profileRemote };
     return null;
   }, [profileLocal, profileRemote]);
+
+  const displayAvatar = useMemo(() => {
+    if (avatarLocal) return { uri: avatarLocal };
+    if (avatarRemote) return { uri: avatarRemote };
+    return undefined;
+  }, [avatarLocal, avatarRemote]);
 
   // ---------- permissões ----------
   const ensureCameraPerm = useCallback(async () => {
@@ -121,7 +99,7 @@ export default function ProfileSetupScreen() {
   }, []);
 
   // ---------- manipulação de imagem ----------
-  const processImage = useCallback(async (uri: string, squareMax = 512) => {
+  const processSquare = useCallback(async (uri: string, squareMax = 512) => {
     const result = await ImageManipulator.manipulateAsync(
       uri,
       [{ resize: { width: squareMax, height: squareMax } }],
@@ -130,7 +108,7 @@ export default function ProfileSetupScreen() {
     return result.uri;
   }, []);
 
-  const processImageWide = useCallback(async (uri: string, maxWidth = 1080) => {
+  const processWide = useCallback(async (uri: string, maxWidth = 1080) => {
     const result = await ImageManipulator.manipulateAsync(
       uri,
       [{ resize: { width: maxWidth } }],
@@ -143,14 +121,14 @@ export default function ProfileSetupScreen() {
   const pickAvatar = useCallback(async () => {
     if (!(await ensureGalleryPerm())) return;
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.9,
     });
     if (res.canceled) return;
-    setAvatarLocal(await processImage(res.assets[0].uri, 512));
-  }, [ensureGalleryPerm, processImage]);
+    setAvatarLocal(await processSquare(res.assets[0].uri));
+  }, [ensureGalleryPerm, processSquare]);
 
   const takeAvatar = useCallback(async () => {
     if (!(await ensureCameraPerm())) return;
@@ -160,20 +138,20 @@ export default function ProfileSetupScreen() {
       quality: 0.9,
     });
     if (res.canceled) return;
-    setAvatarLocal(await processImage(res.assets[0].uri, 512));
-  }, [ensureCameraPerm, processImage]);
+    setAvatarLocal(await processSquare(res.assets[0].uri));
+  }, [ensureCameraPerm, processSquare]);
 
   const pickProfile = useCallback(async () => {
     if (!(await ensureGalleryPerm())) return;
     const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       aspect: [4, 5],
       quality: 0.9,
     });
     if (res.canceled) return;
-    setProfileLocal(await processImageWide(res.assets[0].uri, 1080));
-  }, [ensureGalleryPerm, processImageWide]);
+    setProfileLocal(await processWide(res.assets[0].uri));
+  }, [ensureGalleryPerm, processWide]);
 
   const takeProfile = useCallback(async () => {
     if (!(await ensureCameraPerm())) return;
@@ -183,52 +161,26 @@ export default function ProfileSetupScreen() {
       quality: 0.9,
     });
     if (res.canceled) return;
-    setProfileLocal(await processImageWide(res.assets[0].uri, 1080));
-  }, [ensureCameraPerm, processImageWide]);
+    setProfileLocal(await processWide(res.assets[0].uri));
+  }, [ensureCameraPerm, processWide]);
 
-  // ---------- toggle interesses ----------
-  const toggle = useCallback(
-    (id: string) => {
-      setSelected((prev) => {
-        const exists = prev.includes(id);
-        if (exists) return prev.filter((x) => x !== id);
-        if (prev.length >= maxInterests) {
-          Alert.alert('Limite atingido', `Podes escolher até ${maxInterests} interesses.`);
-          return prev;
-        }
-        return [...prev, id];
-      });
-    },
-    [maxInterests]
-  );
-
-  // ---------- carregar dados ----------
+  // ---------- load ----------
   useEffect(() => {
     let mount = true;
     (async () => {
       try {
-        // maxInterests (config opcional)
-        try {
-          const cfg = await getDoc(doc(db, 'app_config', 'general'));
-          const data = (cfg.exists() ? (cfg.data() as AppConfig) : {}) || {};
-          if (typeof data.maxInterests === 'number') setMaxInterests(data.maxInterests);
-        } catch (_) {}
-
         const snap = await getDoc(doc(db, 'users', uid));
         if (!mount) return;
 
         if (snap.exists()) {
           const u = snap.data() as UserDoc;
-          setNickname(u.nickname || u.displayName || randomNickname());
+          setNickname(u.nickname || u.displayName || '');
           setAgeStr(typeof u.age === 'number' ? String(u.age) : '');
           setBio(u.bio || '');
           setProfileRemote(u.profilePhoto || null);
           setAvatarRemote(u.avatar || null);
-          setSelected(Array.isArray(u.interests) ? u.interests.slice(0, maxInterests) : []);
         } else {
-          // valores default
-          setNickname(randomNickname());
-          setSelected([]);
+          setNickname(auth.currentUser?.displayName || '');
         }
       } catch (e) {
         console.error(e);
@@ -240,7 +192,7 @@ export default function ProfileSetupScreen() {
     return () => {
       mount = false;
     };
-  }, [uid, maxInterests]);
+  }, [uid]);
 
   // ---------- upload helper ----------
   const uploadToStorage = useCallback(async (localUri: string, remotePath: string) => {
@@ -255,7 +207,7 @@ export default function ProfileSetupScreen() {
   const onSave = useCallback(async () => {
     const nick = nickname.trim();
     if (!nick) {
-      Alert.alert('Validação', 'Escolhe um nickname.');
+      Alert.alert('Validação', 'O nickname não pode estar vazio.');
       return;
     }
     const age = ageStr.trim() ? Number(ageStr.trim()) : undefined;
@@ -270,7 +222,6 @@ export default function ProfileSetupScreen() {
       let profileUrl = profileRemote || null;
       let avatarUrl = avatarRemote || null;
 
-      // upload se escolhidas novas imagens
       if (profileLocal) {
         const path = `users/${uid}/profile_${Date.now()}.jpg`;
         profileUrl = await uploadToStorage(profileLocal, path);
@@ -278,10 +229,6 @@ export default function ProfileSetupScreen() {
       if (avatarLocal) {
         const path = `users/${uid}/avatar_${Date.now()}.jpg`;
         avatarUrl = await uploadToStorage(avatarLocal, path);
-      }
-      // se não existir avatar, usa gerado por nickname
-      if (!avatarUrl) {
-        avatarUrl = avatarFromNickname(nick);
       }
 
       await setDoc(
@@ -293,29 +240,17 @@ export default function ProfileSetupScreen() {
           bio: bio.trim(),
           profilePhoto: profileUrl,
           avatar: avatarUrl,
-          interests: selected,
-          profileCompleted: true,
           updatedAt: serverTimestamp(),
         } as Partial<UserDoc>,
         { merge: true }
       );
 
-      // navegação ao concluir
-      if (onDone) {
-        navigation.navigate(onDone as any);
-      } else {
-        // tenta reset para Tabs; se não existir, volta atrás
-        try {
-          navigation.dispatch(
-            CommonActions.reset({
-              index: 0,
-              routes: [{ name: 'Tabs' as never }],
-            })
-          );
-        } catch {
-          navigation.goBack();
-        }
-      }
+      setProfileLocal(null);
+      setAvatarLocal(null);
+      setProfileRemote(profileUrl);
+      setAvatarRemote(avatarUrl);
+
+      Alert.alert('Guardado', 'Perfil atualizado com sucesso.');
     } catch (e) {
       console.error(e);
       Alert.alert('Erro', 'Não foi possível guardar o teu perfil.');
@@ -330,31 +265,21 @@ export default function ProfileSetupScreen() {
     avatarLocal,
     profileRemote,
     avatarRemote,
-    selected,
     uid,
     uploadToStorage,
-    navigation,
-    onDone,
   ]);
 
-  // ---------- UI ----------
-  const Chip = ({ active, label, onPress }: { active?: boolean; label: string; onPress?: () => void }) => (
-    <TouchableOpacity
-      onPress={onPress}
-      style={{
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: active ? COLORS.brand : COLORS.border,
-        backgroundColor: active ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.04)',
-        marginRight: 8,
-        marginBottom: 8,
-      }}
-    >
-      <Text style={{ color: active ? '#fff' : COLORS.text, fontWeight: '700', fontSize: 12 }}>#{label}</Text>
-    </TouchableOpacity>
-  );
+  // ---------- ações ----------
+  const goInterests = useCallback(() => navigation.navigate('Interesses'), [navigation]);
+  const goMatches = useCallback(() => navigation.navigate('Matches'), [navigation]);
+  const doLogout = useCallback(async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Erro', 'Não foi possível terminar sessão.');
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -374,8 +299,8 @@ export default function ProfileSetupScreen() {
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
           {/* Header */}
           <View style={{ paddingBottom: 12, borderBottomWidth: 1, borderColor: COLORS.border, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Ionicons name="person-circle" size={22} color={COLORS.brand} />
-            <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: '800' }}>Completa o teu perfil</Text>
+            <Ionicons name="person" size={20} color={COLORS.brand} />
+            <Text style={{ color: COLORS.text, fontSize: 20, fontWeight: '800' }}>O meu perfil</Text>
           </View>
 
           {/* Fotos */}
@@ -384,7 +309,13 @@ export default function ProfileSetupScreen() {
             <View style={{ flex: 1, alignItems: 'center' }}>
               <Text style={{ color: COLORS.text, fontWeight: '800', marginBottom: 6 }}>Avatar</Text>
               <View style={{ width: 110, height: 110, borderRadius: 999, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.line, backgroundColor: '#1f2937' }}>
-                <Image source={displayAvatar} style={{ width: '100%', height: '100%' }} />
+                {displayAvatar ? (
+                  <Image source={displayAvatar} style={{ width: '100%', height: '100%' }} />
+                ) : (
+                  <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                    <Ionicons name="person-circle" size={42} color={COLORS.sub} />
+                  </View>
+                )}
               </View>
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
                 <TouchableOpacity
@@ -442,7 +373,7 @@ export default function ProfileSetupScreen() {
             </View>
           </View>
 
-          {/* Nickname */}
+          {/* Dados básicos */}
           <View style={{ marginBottom: 12 }}>
             <Text style={{ color: COLORS.text, fontWeight: '800', marginBottom: 6 }}>Nickname</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.input, borderRadius: 12, paddingHorizontal: 10, borderWidth: 1, borderColor: COLORS.border }}>
@@ -450,19 +381,15 @@ export default function ProfileSetupScreen() {
               <TextInput
                 value={nickname}
                 onChangeText={setNickname}
-                placeholder="Escolhe um nickname"
+                placeholder="O teu nickname"
                 placeholderTextColor={COLORS.sub}
                 style={{ flex: 1, color: COLORS.text, paddingVertical: 10, marginLeft: 8 }}
                 maxLength={24}
                 autoCapitalize="none"
               />
-              <TouchableOpacity onPress={() => setNickname(randomNickname())} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Ionicons name="refresh" size={18} color={COLORS.sub} />
-              </TouchableOpacity>
             </View>
           </View>
 
-          {/* Idade & Bio */}
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
             <View style={{ flex: 1 }}>
               <Text style={{ color: COLORS.text, fontWeight: '800', marginBottom: 6 }}>Idade (opcional)</Text>
@@ -496,43 +423,86 @@ export default function ProfileSetupScreen() {
             </View>
           </View>
 
-          {/* Interesses rápidos */}
-          <View style={{ marginTop: 6, marginBottom: 8 }}>
-            <Text style={{ color: COLORS.text, fontWeight: '800', marginBottom: 6 }}>Interesses (rápido)</Text>
-            <Text style={{ color: COLORS.sub, marginBottom: 8 }}>
-              Selecionados: <Text style={{ color: COLORS.text, fontWeight: '800' }}>{selected.length}</Text> / {maxInterests}
-            </Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-              {quickInterests.map((it) => {
-                const active = selected.includes(it.id);
-                return <Chip key={it.id} label={it.name} active={active} onPress={() => toggle(it.id)} />;
-              })}
+          {/* Email */}
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ color: COLORS.text, fontWeight: '800', marginBottom: 6 }}>Email</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.input, borderRadius: 12, paddingHorizontal: 10, borderWidth: 1, borderColor: COLORS.border }}>
+              <Ionicons name="mail" size={16} color={COLORS.sub} />
+              <Text style={{ color: COLORS.text, paddingVertical: 10, marginLeft: 8 }} numberOfLines={1}>
+                {email || '—'}
+              </Text>
             </View>
-            <Text style={{ color: COLORS.sub, fontSize: 12, marginTop: 6 }}>
-              Podes editar interesses com mais detalhe mais tarde na aba <Text style={{ color: COLORS.text, fontWeight: '800' }}>Interesses</Text>.
-            </Text>
           </View>
 
-          {/* Guardar */}
-          <View style={{ height: 12 }} />
-          <TouchableOpacity
-            disabled={saving}
-            onPress={onSave}
-            style={{
-              backgroundColor: saving ? '#4b5563' : COLORS.brand,
-              borderWidth: 1,
-              borderColor: COLORS.border,
-              padding: 14,
-              borderRadius: 14,
-              alignItems: 'center',
-            }}
-          >
-            {saving ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '800' }}>Concluir</Text>}
-          </TouchableOpacity>
+          {/* Ações */}
+          <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
+            <TouchableOpacity
+              onPress={onSave}
+              disabled={saving}
+              style={{
+                flex: 1,
+                backgroundColor: saving ? '#4b5563' : COLORS.brand,
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                padding: 14,
+                borderRadius: 14,
+                alignItems: 'center',
+              }}
+            >
+              {saving ? <ActivityIndicator color="#fff" /> : <Text style={{ color: '#fff', fontWeight: '800' }}>Guardar</Text>}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={goInterests}
+              style={{
+                flex: 1,
+                backgroundColor: COLORS.card,
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                padding: 14,
+                borderRadius: 14,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: COLORS.text, fontWeight: '800' }}>Editar interesses</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+            <TouchableOpacity
+              onPress={goMatches}
+              style={{
+                flex: 1,
+                backgroundColor: COLORS.card,
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                padding: 14,
+                borderRadius: 14,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: COLORS.text, fontWeight: '800' }}>Abrir Matches</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={doLogout}
+              style={{
+                flex: 1,
+                backgroundColor: '#7f1d1d',
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                padding: 14,
+                borderRadius: 14,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '800' }}>Terminar sessão</Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={{ height: 8 }} />
           <Text style={{ color: COLORS.sub, fontSize: 12, textAlign: 'center' }}>
-            Podes alterar tudo isto mais tarde no teu perfil.
+            Mantém o teu perfil atualizado para melhores sugestões de matches.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
