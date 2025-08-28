@@ -94,24 +94,6 @@ export default function MatchScreen({ navigation }: any) {
   const lastWriteRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!uid || authLoading) return;
-    const interests = (me?.interests ?? []).slice(0, MAX_INTERESTS);
-
-    if (prevInterestsRef.current && isEqual(prevInterestsRef.current, interests)) return;
-    prevInterestsRef.current = interests;
-
-    const now = Date.now();
-    if (now - lastWriteRef.current < 5000) return;
-    lastWriteRef.current = now;
-
-    if (interests.length) {
-      setDoc(
-        doc(db, 'match_queue', uid),
-        { status: 'waiting', interests, ts: serverTimestamp() },
-        { merge: true }
-      ).catch((e) => console.error('[match:init]', e));
-    }
-  }, [uid, me, authLoading]);
 
   // pontuação de afinidade simples (nº de interesses em comum, desempate por idade próxima se existir)
   const scoreCandidate = useCallback((mine: UserDoc, other: UserDoc) => {
