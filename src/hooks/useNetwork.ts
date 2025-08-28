@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import NetInfo from '@react-native-community/netinfo';
-import { Firestore, disableNetwork, enableNetwork } from 'firebase/firestore';
+import { Firestore } from 'firebase/firestore';
 
-export default function useNetwork(db?: Firestore) {
+export default function useNetwork(_db?: Firestore) {
   const [isConnected, setIsConnected] = useState(true);
 
   useEffect(() => {
@@ -18,15 +18,6 @@ export default function useNetwork(db?: Firestore) {
 
     return () => unsubscribe();
   }, []);
-
-  useEffect(() => {
-    if (!db) return;
-    if (isConnected) {
-      enableNetwork(db).catch(() => {});
-    } else {
-      disableNetwork(db).catch(() => {});
-    }
-  }, [db, isConnected]);
 
   return { isConnected };
 }
