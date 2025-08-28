@@ -119,27 +119,35 @@ export default function InterestsScreen({ navigation }: any) {
     return A.some((v, i) => v !== B[i]);
   }, [selected, initialSelected]);
 
-  const categories = useMemo<string[]>(() => {
-    const s = new Set<string>(['Todos']);
-    items.forEach((i) => s.add(i.cat));
-    return Array.from(s);
+  const itemsByCat = useMemo(() => {
+    const map = new Map<string, Interest[]>();
+    items.forEach((i) => {
+      if (!map.has(i.cat)) map.set(i.cat, []);
+      map.get(i.cat)!.push(i);
+    });
+    return map;
   }, [items]);
+
+  const categories = useMemo<string[]>(() => ['Todos', ...Array.from(itemsByCat.keys())], [itemsByCat]);
 
   const filtered = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((i) => i.name.toLowerCase().includes(q));
-  }, [items, debouncedSearch]);
+    const base = cat === 'Todos' ? items : itemsByCat.get(cat) ?? [];
+    if (!q) return base;
+    return base.filter((i) => i.name.toLowerCase().includes(q));
+  }, [items, itemsByCat, cat, debouncedSearch]);
+
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
 
   const renderItem = useCallback(
     ({ item }: { item: Interest }) => (
       <InterestChip
         label={item.name}
-        active={selected.includes(item.id)}
+        active={selectedSet.has(item.id)}
         onPress={() => toggle(item.id)}
       />
     ),
-    [selected, toggle]
+    [selectedSet, toggle]
   );
 
   const keyExtractor = useCallback((i:any) => i.id, []);
