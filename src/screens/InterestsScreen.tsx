@@ -51,6 +51,34 @@ type AppConfig = {
   maxInterests?: number;
 };
 
+const Chip = React.memo(function Chip({
+  active,
+  label,
+  onPress,
+}: {
+  active?: boolean;
+  label: string;
+  onPress?: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={{
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: active ? COLORS.brand : COLORS.border,
+        backgroundColor: active ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.04)',
+        marginRight: 8,
+        marginBottom: 8,
+      }}
+    >
+      <Text style={{ color: active ? '#fff' : COLORS.text, fontWeight: '700', fontSize: 12 }}>#{label}</Text>
+    </TouchableOpacity>
+  );
+});
+
 export default function InterestsScreen({ navigation }: any) {
   const uid = auth.currentUser?.uid!;
   const tabBarHeight = useBottomTabBarHeight();
@@ -213,23 +241,6 @@ export default function InterestsScreen({ navigation }: any) {
   }, [uid, changed, selected]);
 
   // ---------- UI ----------
-  const Chip = ({ active, label, onPress }: { active?: boolean; label: string; onPress?: () => void }) => (
-    <TouchableOpacity
-      onPress={onPress}
-      style={{
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: active ? COLORS.brand : COLORS.border,
-        backgroundColor: active ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.04)',
-        marginRight: 8,
-        marginBottom: 8,
-      }}
-    >
-      <Text style={{ color: active ? '#fff' : COLORS.text, fontWeight: '700', fontSize: 12 }}>#{label}</Text>
-    </TouchableOpacity>
-  );
 
   if (loading) {
     return (
