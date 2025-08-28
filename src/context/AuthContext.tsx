@@ -3,7 +3,6 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth, db } from '../services/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { InteractionManager } from 'react-native';
 
 type UserDoc = {
   profileCompleted?: boolean;
@@ -15,14 +14,14 @@ type UserDoc = {
   [k: string]: any;
 };
 
-type AuthCtx = {
+type CtxType = {
   user: User | null;
   userDoc: UserDoc | null;
   profileCompleted: boolean;
-  loading: boolean; // true até sabermos o estado (auth + userDoc)
+  loading: boolean; // true até sabermos: (a) auth resolvida, (b) userDoc lido (se houver user)
 };
 
-const Ctx = createContext<AuthCtx>({
+const Ctx = createContext<CtxType>({
   user: null,
   userDoc: null,
   profileCompleted: false,
@@ -31,46 +30,38 @@ const Ctx = createContext<AuthCtx>({
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   const [userDoc, setUserDoc] = useState<UserDoc | null>(null);
-  const [authReady, setAuthReady] = useState(false);
   const [docReady, setDocReady] = useState(false);
 
-  // 1) auth
+  // 1) Autenticação
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
+    const unsub = onAuthStateChanged(auth, u => {
       setUser(u);
       setAuthReady(true);
     });
     return () => unsub();
   }, []);
 
-// 2) doc do utilizador (só quando autenticado)
+  // 2) Documento do utilizador (sem atrasos)
   useEffect(() => {
     setUserDoc(null);
     setDocReady(false);
-    if (!user) {
-      // sem user, não há doc para carregar
-      setDocReady(true);
-      return;
-    }
-    let unsub: (() => void) | undefined;
-    const task = InteractionManager.runAfterInteractions(() => {
-      const ref = doc(db, 'users', user.uid);
-      unsub = onSnapshot(
-        ref,
-        (snap) => {
-          setUserDoc(snap.exists() ? (snap.data() as UserDoc) : null);
-          setDocReady(true);
-        },
-        () => setDocReady(true)
-      );
-    });
-    return () => {
-      if (unsub) unsub();
-      task.cancel();
-    };
-  }, [user]);
+
+    if (!user) { setDocReady(true); return; }
+
+    const ref = doc(db, 'users', user.uid);
+    const unsub = onSnapshot(
+      ref,
+      snap => {
+        setUserDoc(snap.exists() ? (snap.data() as UserDoc) : null);
+        setDocReady(true);
+      },
+      _err => { setDocReady(true); } // não bloqueia caso dê erro
+    );
+    return () => unsub();
+  }, [user?.uid]);
 
   const loading = !authReady || (user ? !docReady : false);
   const profileCompleted = !!userDoc?.profileCompleted;

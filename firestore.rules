@@ -1,17 +1,52 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isSignedIn() {
-      return request.auth != null;
-    }
-    function uid() {
-      return request.auth != null ? request.auth.uid : null;
+
+    function isSignedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+
+    // === Users ===
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && userId == uid();
+      allow update: if isSignedIn() && userId == uid();
+      allow delete: if false; // manter histórico, ou gerir por Cloud Function
     }
 
-    match /match_queue/{userId} {
+    // === Interests (seed) ===
+    match /interests/{interestId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && userId == uid();
+      // Apenas admins (definidos num map /admins/{uid}) podem escrever
+      allow create, update, delete: if exists(/databases/$(database)/documents/admins/$(uid()));
     }
-    // TODO: outras regras aqui
+
+    // === Match queue ===
+    match /match_queue/{userId} {
+      allow read, write: if isSignedIn() && userId == uid();
+    }
+
+    // === Matches ===
+    match /matches/{matchId} {
+      allow read: if isSignedIn() && isParticipant();
+      allow update, delete: if isSignedIn() && isParticipant();
+      allow create: if isSignedIn();
+      
+      function isParticipant() {
+        return request.resource.data.participants.hasAny([uid()]) ||
+               resource.data.participants.hasAny([uid()]);
+      }
+
+      // Mensagens do match
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && isParticipant();
+        allow create: if isSignedIn() && isParticipant() &&
+                      request.resource.data.from == uid() &&
+                      request.resource.data.createdAt == request.time &&
+                      request.resource.data.text is string &&
+                      request.resource.data.text.size() > 0 &&
+                      request.resource.data.text.size() <= 1000;
+        allow update, delete: if false;
+      }
+    }
   }
 }

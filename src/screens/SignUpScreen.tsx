@@ -38,7 +38,7 @@ export default function SignUpScreen({ navigation }: any) {
         email: email.trim(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        profileComplete: false
+        profileCompleted: false
       }, { merge: true });
 
       Alert.alert('Conta criada!', 'Vamos configurar o teu perfil.');

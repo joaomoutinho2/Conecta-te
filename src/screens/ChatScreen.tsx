@@ -1,24 +1,23 @@
 // src/screens/ChatScreen.tsx
+// ChatScreen otimizado: subscrição leve, paginação por blocos, envio com serverTimestamp,
+// e pequenos cuidados de UI/performance para React Native + Expo + Firestore (v9 modular).
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  TextInput,
-  TouchableOpacity,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
-  Image,
   SafeAreaView,
-  Alert,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  FlatList,
+  RefreshControl,
 } from 'react-native';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { auth, db } from '../services/firebase';
-import useNetwork from '../hooks/useNetwork';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import {
   addDoc,
   collection,
@@ -34,251 +33,162 @@ import {
   DocumentData,
   QueryDocumentSnapshot,
 } from 'firebase/firestore';
+import { auth, db } from '../services/firebase';
 
-type Msg = {
-  id: string;
-  from: string;
-  text: string;
-  createdAt?: any; // Firestore Timestamp
-  system?: boolean;
+// Se já tiveres este tipo no teu projeto, importa-o daqui:
+// import { RootStackParamList } from '@/navigation/RootNavigator';
+// Para evitar que isto quebre se o tipo não existir, definimos um fallback mínimo:
+
+type RootStackParamList = {
+  Chat: {
+    matchId: string;
+    peer?: { uid: string; name?: string; avatar?: string | null };
+  };
 };
 
-type MatchDoc = {
-  participants: string[];
-  lastMessageAt?: any;
-  lastSeen?: Record<string, any>;
-};
+type ChatRouteProp = RouteProp<RootStackParamList, 'Chat'>;
 
-type UserDoc = {
-  displayName?: string;
-  nickname?: string;
-  profilePhoto?: string;
-  avatar?: string;
-};
-
-type RouteParams = {
-  mid: string;      // match id
-  otherUid: string; // uid do outro participante
-};
-
-const COLORS = {
-  bg: '#0f172a',
-  card: 'rgba(255,255,255,0.06)',
-  border: 'rgba(255,255,255,0.15)',
-  text: '#e5e7eb',
-  sub: '#9ca3af',
-  brand: '#7c3aed',
-  error: '#fb7185',
-  input: 'rgba(255,255,255,0.08)',
-  bubbleMine: '#7c3aed',
-  bubbleOther: '#1f2937',
-};
-
-const PAGE_SIZE = 30; // nº de mensagens por página
+const PAGE = 50; // nº de mensagens por "página"
 
 export default function ChatScreen() {
-  const navigation = useNavigation<any>();
-  const route = useRoute();
-  const { mid, otherUid } = (route.params || {}) as RouteParams;
+  const navigation = useNavigation();
+  const route = useRoute<ChatRouteProp>();
+  const { matchId, peer } = route.params || ({} as any);
 
-  const uid = auth.currentUser?.uid!;
-  const { isConnected } = useNetwork(db);
-  const listRef = useRef<FlatList<Msg>>(null);
+  const uid = auth.currentUser?.uid as string | undefined;
 
-  const [loading, setLoading] = useState(true);
+  const msgsRef = useMemo(() => {
+    if (!matchId) return null;
+    return collection(db, 'matches', matchId, 'messages');
+  }, [matchId]);
+
+  const [messages, setMessages] = useState<Array<{ id: string; from: string; text: string; createdAt: any }>>([]);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [matchDoc, setMatchDoc] = useState<MatchDoc | null>(null);
-  const [otherUser, setOtherUser] = useState<UserDoc | null>(null);
+  const firstDocRef = useRef<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const listRef = useRef<FlatList>(null);
 
-  // cursor para paginação (doc mais antigo atualmente carregado)
-  const [oldestDoc, setOldestDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(true);
-
-  const title = useMemo(
-    () => otherUser?.displayName || otherUser?.nickname || 'Conversa',
-    [otherUser]
-  );
-
-  const scrollToEnd = useCallback(() => {
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({ animated: true });
-    });
-  }, []);
-
-  // --- Header (match + outro utilizador)
+  // Header simples com botão voltar e nome do peer (se existir)
   useEffect(() => {
-    let unsubMatch: any;
-    let unsubOther: any;
+    navigation.setOptions?.({
+      headerShown: true,
+      headerTitle: peer?.name ?? 'Conversa',
+      headerLeft: () => (
+        <TouchableOpacity style={{ paddingHorizontal: 8 }} onPress={() => navigation.goBack()}>
+          <Ionicons name="chevron-back" size={24} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, peer?.name]);
 
-    const run = async () => {
-      try {
-        unsubMatch = onSnapshot(doc(db, 'matches', mid), (snap) => {
-          setMatchDoc(snap.exists() ? (snap.data() as MatchDoc) : null);
-        });
-        unsubOther = onSnapshot(doc(db, 'users', otherUid), (snap) => {
-          setOtherUser(snap.exists() ? (snap.data() as UserDoc) : null);
-        });
-      } catch (e) {
-        console.error('[chat header]', e);
+  // Subscrição principal às últimas PAGE mensagens, por ordem cronológica (asc)
+  useEffect(() => {
+    if (!msgsRef) return;
+
+    const q = query(msgsRef, orderBy('createdAt', 'asc'), limitToLast(PAGE));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const docs = snap.docs as QueryDocumentSnapshot<DocumentData>[];
+        const items = docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+
+        setMessages(items);
+        firstDocRef.current = docs[0] || null;
+        setInitialLoading(false);
+
+        // Scroll para o fim quando chega novo conteúdo (simples, não invasivo)
+        setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 0);
+      },
+      (_err) => {
+        setInitialLoading(false);
       }
-    };
-    run();
-    return () => {
-      unsubMatch && unsubMatch();
-      unsubOther && unsubOther();
-    };
-  }, [mid, otherUid]);
+    );
 
-  // --- marca como lido (com throttle para evitar writes repetidos)
-  const lastMarkRef = useRef(0);
-  const markReadThrottled = useCallback(async () => {
-    const now = Date.now();
-    if (now - lastMarkRef.current < 4000) return; // no máximo 1 write/4s
-    lastMarkRef.current = now;
-    if (!uid) return;
+    return () => unsub();
+  }, [msgsRef]);
+
+  // Carregar mensagens mais antigas (paginado), puxar para baixo (pull-to-refresh)
+  const loadOlder = useCallback(async () => {
+    if (!msgsRef) return;
+    const firstDoc = firstDocRef.current;
+    if (!firstDoc) return; // já não há mais antigas no buffer atual
+
+    setRefreshing(true);
     try {
-      await updateDoc(doc(db, 'matches', mid), {
-        [`lastSeen.${uid}`]: serverTimestamp(),
-      });
-    } catch (e) {
-      console.warn('[chat markRead]', e);
-    }
-  }, [mid, uid]);
-
-  // --- Listener vivo das últimas mensagens
-  useFocusEffect(
-    useCallback(() => {
-      setLoading(true);
-      setHasMore(true);
-
-      const msgsRef = collection(db, 'matches', mid, 'messages');
-      const qLive = query(msgsRef, orderBy('createdAt', 'asc'), limitToLast(PAGE_SIZE));
-
-      const unsub = onSnapshot(qLive, (qs) => {
-        const arr: Msg[] = [];
-        qs.forEach((d) => arr.push({ id: d.id, ...(d.data() as any) }));
-        setMessages(arr);
-        setOldestDoc(qs.docs.length ? qs.docs[0] : null);
-        setLoading(false);
-        if (arr.length) {
-          scrollToEnd();
-          // só marca como lido se a última mensagem não for tua
-          const last = arr[arr.length - 1];
-          if (last?.from && last.from !== uid) markReadThrottled();
-        }
-      });
-
-      // marca uma vez quando entras (throttled)
-      markReadThrottled();
-
-      return () => unsub();
-    }, [mid, scrollToEnd, markReadThrottled, uid])
-  );
-
-  // --- Carregar mensagens mais antigas (prepend) quando chegas ao topo
-  const loadMore = useCallback(async () => {
-    if (loadingMore || !oldestDoc || !hasMore) return;
-    try {
-      setLoadingMore(true);
-      const msgsRef = collection(db, 'matches', mid, 'messages');
-
-      const qOlder = query(
+      const olderQ = query(
         msgsRef,
         orderBy('createdAt', 'asc'),
-        endBefore(oldestDoc),
-        limitToLast(PAGE_SIZE)
+        endBefore(firstDoc),
+        limitToLast(PAGE)
       );
+      const olderSnap = await getDocs(olderQ);
+      const olderDocs = olderSnap.docs as QueryDocumentSnapshot<DocumentData>[];
+      const older = olderDocs.map((d) => ({ id: d.id, ...(d.data() as any) }));
 
-      const qs = await getDocs(qOlder);
-      const olderArr: Msg[] = [];
-      qs.forEach((d) => olderArr.push({ id: d.id, ...(d.data() as any) }));
-
-      if (olderArr.length === 0) {
-        setHasMore(false);
-        return;
-      }
-
-      // Prepend mantendo ordem cronológica
-      setMessages((prev) => [...olderArr, ...prev]);
-
-      // Atualiza cursor: o primeiro doc agora é o mais antigo carregado
-      setOldestDoc(qs.docs.length ? qs.docs[0] : null);
-    } catch (e) {
-      console.error('[chat loadMore]', e);
-      Alert.alert('Erro', 'Não foi possível carregar mensagens antigas.');
+      setMessages((prev) => [...older, ...prev]);
+      firstDocRef.current = olderDocs[0] || null;
     } finally {
-      setLoadingMore(false);
+      setRefreshing(false);
     }
-  }, [mid, oldestDoc, loadingMore, hasMore]);
+  }, [msgsRef]);
 
-  // Detecta aproximação ao topo
-  const onScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (e.nativeEvent.contentOffset.y < 80) {
-        loadMore();
-      }
-    },
-    [loadMore]
-  );
-
-  // --- Enviar mensagem
+  // Enviar mensagem
   const sendMessage = useCallback(async () => {
+    if (!msgsRef || !uid) return;
     const text = input.trim();
-    if (!text || !uid) return;
+    if (!text) return;
+    if (text.length > 1000) {
+      // regra de 1000 chars
+      return;
+    }
 
+    setSending(true);
     try {
-      setSending(true);
-      const msgsRef = collection(db, 'matches', mid, 'messages');
-
+      // Criar mensagem (compatível com regras: from == uid, createdAt == request.time)
       await addDoc(msgsRef, {
         from: uid,
         text,
         createdAt: serverTimestamp(),
       });
 
-      await updateDoc(doc(db, 'matches', mid), {
-        lastMessageAt: serverTimestamp(),
-      });
+      // Atualizar metadados do match (se existir)
+      if (matchId) {
+        const matchRef = doc(db, 'matches', matchId);
+        // estes campos são genéricos e seguros; adapta à tua estrutura se tiveres badges/unreads
+        await updateDoc(matchRef, {
+          lastMessageAt: serverTimestamp(),
+          lastMessageText: text.slice(0, 200),
+        }).catch(() => {});
+      }
 
       setInput('');
-      scrollToEnd();
-    } catch (e) {
-      console.error('[sendMessage]', e);
-      Alert.alert('Erro', 'Não foi possível enviar a mensagem.');
+      // Scroll para o fim após enviar
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
     } finally {
       setSending(false);
     }
-  }, [uid, mid, input, scrollToEnd]);
+  }, [msgsRef, uid, input, matchId]);
 
-  // --- Render
+  // Marcar como lido quando abrimos o chat (opcional, genérico)
+  useEffect(() => {
+    const markRead = async () => {
+      if (!uid || !matchId) return;
+      const matchRef = doc(db, 'matches', matchId);
+      await updateDoc(matchRef, { ["reads." + uid]: serverTimestamp() }).catch(() => {});
+    };
+    markRead();
+  }, [uid, matchId]);
+
   const renderItem = useCallback(
-    ({ item }: { item: Msg }) => {
-      const isMine = item.from === uid;
+    ({ item }: { item: any }) => {
+      const mine = item.from === uid;
       return (
-        <View
-          style={{
-            flexDirection: 'row',
-            justifyContent: isMine ? 'flex-end' : 'flex-start',
-            paddingHorizontal: 12,
-            marginTop: 4,
-          }}
-        >
-          <View
-            style={{
-              maxWidth: '78%',
-              backgroundColor: isMine ? COLORS.bubbleMine : COLORS.bubbleOther,
-              borderRadius: 16,
-              paddingHorizontal: 12,
-              paddingVertical: 8,
-              borderWidth: 1,
-              borderColor: COLORS.border,
-            }}
-          >
-            <Text style={{ color: COLORS.text, fontSize: 15 }}>{item.text}</Text>
+        <View style={[styles.row, mine ? styles.rowMine : styles.rowOther]}>
+          <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleOther]}>
+            <Text style={[styles.msgText, mine ? styles.msgTextMine : styles.msgTextOther]}>{item.text}</Text>
           </View>
         </View>
       );
@@ -286,161 +196,119 @@ export default function ChatScreen() {
     [uid]
   );
 
-  const keyExtractor = useCallback((m: Msg) => m.id, []);
-
-  const Header = useMemo(() => {
-    const photo = otherUser?.profilePhoto || otherUser?.avatar;
+  if (!matchId) {
     return (
-      <View
-        style={{
-          paddingHorizontal: 12,
-          paddingTop: 6,
-          paddingBottom: 8,
-          borderBottomWidth: 1,
-          borderColor: COLORS.border,
-          backgroundColor: COLORS.bg,
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 10,
-        }}
-      >
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Ionicons name="chevron-back" size={24} color={COLORS.text} />
-        </TouchableOpacity>
-
-        <View style={{ width: 36, height: 36 }}>
-          {photo ? (
-            <Image
-              source={{ uri: photo }}
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 999,
-                borderWidth: 1,
-                borderColor: '#233047',
-              }}
-            />
-          ) : (
-            <View
-              style={{
-                width: 36,
-                height: 36,
-                borderRadius: 999,
-                backgroundColor: '#1f2937',
-                borderWidth: 1,
-                borderColor: COLORS.border,
-              }}
-            />
-          )}
-        </View>
-
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: COLORS.text, fontWeight: '800' }} numberOfLines={1}>
-            {title}
-          </Text>
-          <Text style={{ color: COLORS.sub, fontSize: 12 }} numberOfLines={1}>
-            {matchDoc ? 'Conversa' : '—'}
-          </Text>
-        </View>
-      </View>
-    );
-  }, [navigation, otherUser, title, matchDoc]);
-
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator color="#fff" />
+      <SafeAreaView style={styles.containerCenter}> 
+        <Text style={{ color: '#e11d48' }}>Chat inválido</Text>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
-      {Header}
-      {!isConnected && (
-        <View style={{ backgroundColor: COLORS.error, padding: 8 }}>
-          <Text style={{ color: '#fff', textAlign: 'center' }}>Sem ligação à internet</Text>
-        </View>
-      )}
+    <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.select({ ios: 'padding', android: undefined })}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 72 : 0}
       >
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          initialNumToRender={20}
-          maxToRenderPerBatch={30}
-          windowSize={7}
-          removeClippedSubviews
-          onScroll={onScroll}
-          scrollEventThrottle={16}
-          ListFooterComponent={
-            loadingMore ? (
-              <View style={{ paddingVertical: 10 }}>
-                <ActivityIndicator color="#fff" />
-              </View>
-            ) : !hasMore ? (
-              <View style={{ paddingVertical: 12, alignItems: 'center' }}>
-                <Text style={{ color: COLORS.sub, fontSize: 12 }}>Sem mais mensagens</Text>
-              </View>
-            ) : null
-          }
-          contentContainerStyle={{ paddingVertical: 10 }}
-        />
+        <View style={styles.listWrap}>
+          {initialLoading ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="large" />
+            </View>
+          ) : (
+            <FlatList
+              ref={listRef}
+              data={messages}
+              keyExtractor={(it) => it.id}
+              renderItem={renderItem}
+              contentContainerStyle={{ padding: 12, paddingBottom: 8 }}
+              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={loadOlder} />}
+              onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+              onLayout={() => listRef.current?.scrollToEnd({ animated: false })}
+            />
+          )}
+        </View>
 
-        {/* Composer */}
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: 10,
-            paddingVertical: 8,
-            borderTopWidth: 1,
-            borderColor: COLORS.border,
-            backgroundColor: COLORS.bg,
-          }}
-        >
+        {/* Barra de envio */}
+        <View style={styles.inputBar}>
           <TextInput
             value={input}
             onChangeText={setInput}
-            placeholder="Escreve uma mensagem..."
-            placeholderTextColor={COLORS.sub}
-            style={{
-              flex: 1,
-              backgroundColor: COLORS.input,
-              borderRadius: 14,
-              paddingHorizontal: 12,
-              paddingVertical: Platform.OS === 'ios' ? 12 : 8,
-              color: COLORS.text,
-              borderWidth: 1,
-              borderColor: COLORS.border,
-            }}
+            placeholder="Escreve uma mensagem"
+            placeholderTextColor="#9ca3af"
+            style={styles.input}
             multiline
+            maxLength={1000}
           />
           <TouchableOpacity
+            style={[styles.sendBtn, (!input.trim() || sending) && styles.sendBtnDisabled]}
+            disabled={!input.trim() || sending}
             onPress={sendMessage}
-            disabled={sending || !input.trim()}
-            style={{
-              marginLeft: 10,
-              backgroundColor: sending || !input.trim() ? '#4b5563' : COLORS.brand,
-              borderRadius: 999,
-              padding: 10,
-              borderWidth: 1,
-              borderColor: COLORS.border,
-            }}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            {sending ? <ActivityIndicator color="#fff" /> : <Ionicons name="send" size={18} color="#fff" />}
+            {sending ? (
+              <ActivityIndicator />
+            ) : (
+              <Ionicons name="send" size={20} />
+            )}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+  containerCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
+  flex: { flex: 1 },
+  listWrap: { flex: 1 },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  row: { width: '100%', paddingVertical: 4, flexDirection: 'row' },
+  rowMine: { justifyContent: 'flex-end' },
+  rowOther: { justifyContent: 'flex-start' },
+
+  bubble: { maxWidth: '80%', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8 },
+  bubbleMine: { backgroundColor: '#e9d5ff', borderTopRightRadius: 4 },
+  bubbleOther: { backgroundColor: '#f3f4f6', borderTopLeftRadius: 4 },
+
+  msgText: { fontSize: 16, lineHeight: 20 },
+  msgTextMine: { color: '#1f2937' },
+  msgTextOther: { color: '#111827' },
+
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e5e7eb',
+    backgroundColor: '#fff',
+  },
+  input: {
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 120,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    fontSize: 16,
+  },
+  sendBtn: {
+    marginLeft: 8,
+    height: 40,
+    width: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e5e7eb',
+    backgroundColor: '#fff',
+  },
+  sendBtnDisabled: {
+    opacity: 0.5,
+  },
+});
