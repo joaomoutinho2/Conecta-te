@@ -3,7 +3,11 @@ import { NavigationContainer } from '@react-navigation/native';
 import RootNavigator from './src/navigation/RootNavigator';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView, StyleSheet } from 'react-native';
+import { enableScreens } from 'react-native-screens';
 import { AuthProvider } from './src/context/AuthContext';
+
+// Enable native screens for better performance
+enableScreens();
 
 export default function App() {
   return (
