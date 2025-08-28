@@ -1,6 +1,11 @@
 // src/screens/MatchScreen.tsx
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+} from 'react';
 import {
   View,
   Text,
@@ -10,27 +15,8 @@ import {
   SafeAreaView,
   Image,
   ScrollView,
+  InteractionManager,
 } from 'react-native';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
-import { InteractionManager } from 'react-native';
-import { auth, db } from '../services/firebase';
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  limit,
-  getDocs,
-  setDoc,
-  doc,
-  runTransaction,
-} from 'firebase/firestore';
-let isEqual;
-try {
-  isEqual = require('fast-deep-equal');
-} catch {
-  isEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-}
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../services/firebase';
@@ -46,9 +32,18 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
-  updateDoc,
   where,
 } from 'firebase/firestore';
+
+// Fallback helper to compare arrays without pulling in an additional
+// dependency at runtime. If `fast-deep-equal` is present it will be used.
+let isEqual: (a: unknown, b: unknown) => boolean;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  isEqual = require('fast-deep-equal');
+} catch {
+  isEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+}
 
 type UserDoc = {
   displayName?: string;

@@ -1,7 +1,23 @@
 // src/screens/InterestsScreen.tsx
-import React, { useMemo, useState, useCallback } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert, SafeAreaView } from 'react-native';
-import ReactMemo from 'react';
+import React, {
+  useMemo,
+  useState,
+  useCallback,
+  useEffect,
+} from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  ActivityIndicator,
+  Alert,
+  SafeAreaView,
+  ScrollView,
+  InteractionManager,
+} from 'react-native';
+import InterestChip from './InterestsChip';
 import useDebouncedValue from '../hooks/useDebouncedValue';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,10 +26,9 @@ import {
   collection,
   getDocs,
   orderBy,
-  query,
+  query as fsQuery,
   writeBatch,
   doc,
-  updateDoc,
   getDoc,
   setDoc,
   serverTimestamp,
@@ -47,8 +62,8 @@ export default function InterestsScreen({ navigation }: any) {
   const [selected, setSelected] = useState<string[]>([]);
   const [initialSelected, setInitialSelected] = useState<string[]>([]);
 
-  const [query, setQuery] = useState('');
-  const debouncedQuery = useDebouncedValue(query, 250);
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [cat, setCat] = useState<string>('Todos');
 
   const [maxInterests, setMaxInterests] = useState<number>(5);
@@ -83,14 +98,21 @@ export default function InterestsScreen({ navigation }: any) {
   }, [items]);
 
   const filtered = useMemo(() => {
-    const q = debouncedQuery.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     if (!q) return items;
-    return items.filter(i => i.name.toLowerCase().includes(q));
-  }, [items, debouncedQuery]);
+    return items.filter((i) => i.name.toLowerCase().includes(q));
+  }, [items, debouncedSearch]);
 
-  const renderItem = useCallback(({ item }: { item: Interest }) => (
-    <InterestChip item={item} onPress={() => toggle(item.id)} />
-  ), [toggle]);
+  const renderItem = useCallback(
+    ({ item }: { item: Interest }) => (
+      <InterestChip
+        label={item.name}
+        active={selected.includes(item.id)}
+        onPress={() => toggle(item.id)}
+      />
+    ),
+    [selected, toggle]
+  );
 
   const keyExtractor = useCallback((i:any) => i.id, []);
 
@@ -98,18 +120,24 @@ export default function InterestsScreen({ navigation }: any) {
   const seedIfEmpty = useCallback(async () => {
     // tenta ler
     const ref = collection(db, 'interests');
-    const snap = await getDocs(query(ref, orderBy('name')));
+    const snap = await getDocs(fsQuery(ref, orderBy('name')));
     if (!snap.empty) return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as Interest));
 
     // vazio → tentar semear (requer permissão de admin pelas regras)
     try {
       const batch = writeBatch(db);
       INTERESTS_SEED.forEach((it) => {
-        batch.set(doc(db, 'interests', it.id), { id: it.id, name: it.name, cat: it.cat });
+        batch.set(doc(db, 'interests', it.id), {
+          id: it.id,
+          name: it.name,
+          cat: it.cat,
+        });
       });
       await batch.commit();
-      const snap2 = await getDocs(query(ref, orderBy('name')));
-      return snap2.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as Interest));
+      const snap2 = await getDocs(fsQuery(ref, orderBy('name')));
+      return snap2.docs.map(
+        (d) => ({ id: d.id, ...(d.data() as any) } as Interest)
+      );
     } catch (e: any) {
       // permissões insuficientes → fallback local (não persistimos a coleção)
       console.warn('[interests seed] sem permissões; a usar seed local só para UI');
@@ -118,7 +146,7 @@ export default function InterestsScreen({ navigation }: any) {
   }, []);
 
   // ---------- load on mount ----------
-  useEffect(() => {
+    useEffect(() => {
       let mounted = true;
       const task = InteractionManager.runAfterInteractions(() => {
         (async () => {
@@ -126,7 +154,7 @@ export default function InterestsScreen({ navigation }: any) {
             // Load interests
             const interests = await seedIfEmpty();
             if (mounted) setItems(interests);
-  
+
             // Load user interests
             if (uid) {
               const userRef = doc(db, 'users', uid);
@@ -138,7 +166,7 @@ export default function InterestsScreen({ navigation }: any) {
                 setInitialSelected(userInterests);
               }
             }
-  
+
             // Load app config (maxInterests)
             const configRef = doc(db, 'app', 'config');
             const configSnap = await getDoc(configRef);
@@ -235,21 +263,33 @@ export default function InterestsScreen({ navigation }: any) {
         >
           <Ionicons name="search" size={16} color={COLORS.sub} />
           <TextInput
-            value={query}
-            onChangeText={setQuery}
+            value={search}
+            onChangeText={setSearch}
             placeholder="Pesquisar..."
             placeholderTextColor={COLORS.sub}
-            style={{ flex: 1, color: COLORS.text, paddingVertical: 10, marginLeft: 8 }}
+            style={{
+              flex: 1,
+              color: COLORS.text,
+              paddingVertical: 10,
+              marginLeft: 8,
+            }}
           />
-          {query ? (
-            <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          {search ? (
+            <TouchableOpacity
+              onPress={() => setSearch('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
               <Ionicons name="close-circle" size={18} color={COLORS.sub} />
             </TouchableOpacity>
           ) : null}
         </View>
 
         {/* filtro por categoria */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingBottom: 8 }}
+        >
           {categories.map((c) => (
             <Chip key={c} label={c} active={c === cat} onPress={() => setCat(c)} />
           ))}
