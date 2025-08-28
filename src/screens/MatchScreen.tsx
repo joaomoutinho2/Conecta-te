@@ -18,8 +18,9 @@ import {
 } from 'react-native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { auth, db } from '../services/firebase';
+import { db } from '../services/firebase';
 import useNetwork from '../hooks/useNetwork';
+import { useAuth } from '../context/AuthContext';
 import {
   collection,
   doc,
@@ -28,7 +29,6 @@ import {
   getDocFromCache,
   getDocsFromCache,
   limit,
-  onSnapshot,
   orderBy,
   query,
   runTransaction,
@@ -82,56 +82,18 @@ function matchIdFor(a: string, b: string) {
 
 export default function MatchScreen({ navigation }: any) {
   const tabBarHeight = useBottomTabBarHeight();
-  const uid = auth.currentUser?.uid!;
+  const { user, userDoc: me, loading: authLoading } = useAuth();
+  const uid = user?.uid!;
   const { isConnected } = useNetwork(db);
-  const [me, setMe] = useState<UserDoc | null>(null);
 
-  const [loading, setLoading] = useState(true);
   const [finding, setFinding] = useState(false);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
 
-  // 1) Ler o meu perfil e garantir que estou na queue “waiting” com os interesses atualizados
+  // Garantir que estou na queue "waiting" com os interesses atualizados
   const prevInterestsRef = useRef<string[] | null>(null);
   const lastWriteRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!uid) return;
-    let unsub: any;
-    (async () => {
-      try {
-        unsub = onSnapshot(doc(db, 'users', uid), async (snap) => {
-          const data = (snap.exists() ? (snap.data() as UserDoc) : null);
-          setMe(data);
-          const interests = (data?.interests ?? []).slice(0, MAX_INTERESTS);
-
-          // Dedupe por conteúdo
-          if (prevInterestsRef.current && isEqual(prevInterestsRef.current, interests)) return;
-          prevInterestsRef.current = interests;
-
-          // Throttle: no máx. 1 write por 5s
-          const now = Date.now();
-          if (now - lastWriteRef.current < 5000) return;
-          lastWriteRef.current = now;
-
-          if (interests.length) {
-            await setDoc(doc(db, 'match_queue', uid), {
-              status: 'waiting',
-              interests,
-              ts: serverTimestamp(),
-            }, { merge: true });
-          }
-          setLoading(false);
-        });
-      } catch (e) {
-        console.error('[match:init]', e);
-        setLoading(false);
-      }
-    })();
-
-    return () => {
-      unsub && unsub();
-    };
-  }, [uid]);
 
   // pontuação de afinidade simples (nº de interesses em comum, desempate por idade próxima se existir)
   const scoreCandidate = useCallback((mine: UserDoc, other: UserDoc) => {
@@ -327,7 +289,7 @@ export default function MatchScreen({ navigation }: any) {
     );
   }, [candidate, startChatWith]);
 
-  if (loading) {
+  if (authLoading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator color="#fff" />
