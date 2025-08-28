@@ -38,11 +38,20 @@ export const auth =
         persistence: getReactNativePersistence(AsyncStorage),
       });
 
-// Firestore com cache local persistente quando suportado.
-// Em ambientes nativos, force long polling para estabilizar a ligação.
+// Firestore com cache local persistente para acesso offline.
+// Em React Native forçamos long polling para maior compatibilidade.
 const isWeb = Platform.OS === 'web';
+let localCache;
+try {
+  // Tenta persistência em disco (AsyncStorage / IndexedDB).
+  localCache = persistentLocalCache();
+} catch (_) {
+  // Fallback para cache em memória caso a persistência não esteja disponível.
+  localCache = memoryLocalCache();
+}
+
 const _db = initializeFirestore(app, {
-  localCache: isWeb ? persistentLocalCache() : memoryLocalCache(),
+  localCache,
   ...(isWeb
     ? { experimentalAutoDetectLongPolling: true }
     : { experimentalForceLongPolling: true, useFetchStreams: false }),

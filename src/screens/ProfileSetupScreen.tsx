@@ -22,6 +22,7 @@ import { auth, db, storage } from '../services/firebase';
 import {
   doc,
   getDoc,
+  getDocFromCache,
   setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -214,10 +215,18 @@ export default function ProfileSetupScreen() {
           if (typeof data.maxInterests === 'number') setMaxInterests(data.maxInterests);
         } catch (_) {}
 
-        const snap = await getDoc(doc(db, 'users', uid));
+        const userRef = doc(db, 'users', uid);
+        let snap;
+        try {
+          // Tenta obter do servidor; se falhar (offline), usa cache local.
+          snap = await getDoc(userRef);
+        } catch (err) {
+          console.warn('[profile] getDoc failed, using cache', err);
+          snap = await getDocFromCache(userRef);
+        }
         if (!mount) return;
 
-        if (snap.exists()) {
+        if (snap?.exists()) {
           const u = snap.data() as UserDoc;
           setNickname(u.nickname || u.displayName || randomNickname());
           setAgeStr(typeof u.age === 'number' ? String(u.age) : '');
