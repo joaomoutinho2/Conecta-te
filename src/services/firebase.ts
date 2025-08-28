@@ -43,7 +43,9 @@ export const auth =
 const isWeb = Platform.OS === 'web';
 const _db = initializeFirestore(app, {
   localCache: isWeb ? persistentLocalCache() : memoryLocalCache(),
-  ...(isWeb ? {} : { experimentalForceLongPolling: true, useFetchStreams: false }),
+  ...(isWeb
+    ? { experimentalAutoDetectLongPolling: true }
+    : { experimentalForceLongPolling: true, useFetchStreams: false }),
 } as any);
 
 // Reduz verbosidade de logs (menos custo no bridge)
