@@ -15,7 +15,6 @@ import {
   Alert,
   SafeAreaView,
   ScrollView,
-  InteractionManager,
 } from 'react-native';
 import InterestChip from './InterestsChip';
 import useDebouncedValue from '../hooks/useDebouncedValue';
@@ -27,7 +26,6 @@ import {
   getDocs,
   orderBy,
   query as fsQuery,
-  writeBatch,
   doc,
   getDoc,
   setDoc,
@@ -50,6 +48,34 @@ const COLORS = {
 type AppConfig = {
   maxInterests?: number;
 };
+
+const Chip = React.memo(function Chip({
+  active,
+  label,
+  onPress,
+}: {
+  active?: boolean;
+  label: string;
+  onPress?: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={{
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: active ? COLORS.brand : COLORS.border,
+        backgroundColor: active ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.04)',
+        marginRight: 8,
+        marginBottom: 8,
+      }}
+    >
+      <Text style={{ color: active ? '#fff' : COLORS.text, fontWeight: '700', fontSize: 12 }}>#{label}</Text>
+    </TouchableOpacity>
+  );
+});
 
 export default function InterestsScreen({ navigation }: any) {
   const uid = auth.currentUser?.uid!;
@@ -91,102 +117,107 @@ export default function InterestsScreen({ navigation }: any) {
     return A.some((v, i) => v !== B[i]);
   }, [selected, initialSelected]);
 
-  const categories = useMemo<string[]>(() => {
-    const s = new Set<string>(['Todos']);
-    items.forEach((i) => s.add(i.cat));
-    return Array.from(s);
+  const itemsByCat = useMemo(() => {
+    const map = new Map<string, Interest[]>();
+    items.forEach((i) => {
+      if (!map.has(i.cat)) map.set(i.cat, []);
+      map.get(i.cat)!.push(i);
+    });
+    return map;
   }, [items]);
+
+  const categories = useMemo<string[]>(() => ['Todos', ...Array.from(itemsByCat.keys())], [itemsByCat]);
 
   const filtered = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((i) => i.name.toLowerCase().includes(q));
-  }, [items, debouncedSearch]);
+    const base = cat === 'Todos' ? items : itemsByCat.get(cat) ?? [];
+    if (!q) return base;
+    return base.filter((i) => i.name.toLowerCase().includes(q));
+  }, [items, itemsByCat, cat, debouncedSearch]);
+
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
 
   const renderItem = useCallback(
     ({ item }: { item: Interest }) => (
       <InterestChip
         label={item.name}
-        active={selected.includes(item.id)}
+        active={selectedSet.has(item.id)}
         onPress={() => toggle(item.id)}
       />
     ),
-    [selected, toggle]
+    [selectedSet, toggle]
   );
 
   const keyExtractor = useCallback((i:any) => i.id, []);
-
-  // ---------- seed interests if needed ----------
-  const seedIfEmpty = useCallback(async () => {
-    // tenta ler
-    const ref = collection(db, 'interests');
-    const snap = await getDocs(fsQuery(ref, orderBy('name')));
-    if (!snap.empty) return snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as Interest));
-
-    // vazio → tentar semear (requer permissão de admin pelas regras)
-    try {
-      const batch = writeBatch(db);
-      INTERESTS_SEED.forEach((it) => {
-        batch.set(doc(db, 'interests', it.id), {
-          id: it.id,
-          name: it.name,
-          cat: it.cat,
-        });
-      });
-      await batch.commit();
-      const snap2 = await getDocs(fsQuery(ref, orderBy('name')));
-      return snap2.docs.map(
-        (d) => ({ id: d.id, ...(d.data() as any) } as Interest)
-      );
-    } catch (e: any) {
-      // permissões insuficientes → fallback local (não persistimos a coleção)
-      console.warn('[interests seed] sem permissões; a usar seed local só para UI');
-      return [...INTERESTS_SEED].sort((a, b) => a.name.localeCompare(b.name));
-    }
-  }, []);
+  // helper to avoid waiting too long for slow requests
+  const withTimeout = useCallback(
+    (p: Promise<any>, ms: number): Promise<any | null> =>
+      new Promise((resolve) => {
+        const to = setTimeout(() => resolve(null), ms);
+        p
+          .then((v) => {
+            clearTimeout(to);
+            resolve(v);
+          })
+          .catch(() => {
+            clearTimeout(to);
+            resolve(null);
+          });
+      }),
+    []
+  );
 
   // ---------- load on mount ----------
-    useEffect(() => {
-      let mounted = true;
-      const task = InteractionManager.runAfterInteractions(() => {
-        (async () => {
-          try {
-            // Load interests
-            const interests = await seedIfEmpty();
-            if (mounted) setItems(interests);
+  useEffect(() => {
+    let mounted = true;
+    // show local seed immediately for faster UI
+    setItems([...INTERESTS_SEED].sort((a, b) => a.name.localeCompare(b.name)));
+    setLoading(false);
 
-            // Load user interests
-            if (uid) {
-              const userRef = doc(db, 'users', uid);
-              const userSnap = await getDoc(userRef);
-              const userData = userSnap.data();
-              const userInterests = userData?.interests ?? [];
-              if (mounted) {
-                setSelected(userInterests);
-                setInitialSelected(userInterests);
-              }
-            }
+    (async () => {
+      try {
+        const interestsPromise = withTimeout(
+          getDocs(fsQuery(collection(db, 'interests'), orderBy('name'))),
+          5000
+        );
+        const userPromise = uid
+          ? withTimeout(getDoc(doc(db, 'users', uid)), 5000)
+          : Promise.resolve(null);
+        const configPromise = withTimeout(getDoc(doc(db, 'app', 'config')), 5000);
 
-            // Load app config (maxInterests)
-            const configRef = doc(db, 'app', 'config');
-            const configSnap = await getDoc(configRef);
-            const configData = configSnap.data() as AppConfig | undefined;
-            if (mounted && configData?.maxInterests) {
-              setMaxInterests(configData.maxInterests);
-            }
-          } catch (e) {
-            console.error(e);
-            Alert.alert('Erro', 'Não foi possível carregar os interesses.');
-          } finally {
-            if (mounted) setLoading(false);
-          }
-        })();
-      });
-      return () => {
-        mounted = false;
-        task.cancel();
-      };
-    }, [uid, seedIfEmpty]);
+        const [snap, userSnap, configSnap] = await Promise.all([
+          interestsPromise,
+          userPromise,
+          configPromise,
+        ]);
+
+        if (mounted && snap && !snap.empty) {
+          setItems(
+            snap.docs.map((d: any) => ({ id: d.id, ...(d.data() as any) } as Interest))
+          );
+        }
+
+        if (mounted && userSnap && userSnap.exists()) {
+          const userData = userSnap.data() as any;
+          const userInterests = userData?.interests ?? [];
+          setSelected(userInterests);
+          setInitialSelected(userInterests);
+        }
+
+        if (mounted && configSnap && configSnap.exists()) {
+          const configData = configSnap.data() as AppConfig;
+          if (configData?.maxInterests) setMaxInterests(configData.maxInterests);
+        }
+      } catch (e) {
+        console.error(e);
+        Alert.alert('Erro', 'Não foi possível carregar os interesses.');
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [uid, withTimeout]);
 
   // ---------- save ----------
   const onSave = useCallback(async () => {
@@ -213,23 +244,6 @@ export default function InterestsScreen({ navigation }: any) {
   }, [uid, changed, selected]);
 
   // ---------- UI ----------
-  const Chip = ({ active, label, onPress }: { active?: boolean; label: string; onPress?: () => void }) => (
-    <TouchableOpacity
-      onPress={onPress}
-      style={{
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: active ? COLORS.brand : COLORS.border,
-        backgroundColor: active ? 'rgba(124,58,237,0.12)' : 'rgba(255,255,255,0.04)',
-        marginRight: 8,
-        marginBottom: 8,
-      }}
-    >
-      <Text style={{ color: active ? '#fff' : COLORS.text, fontWeight: '700', fontSize: 12 }}>#{label}</Text>
-    </TouchableOpacity>
-  );
 
   if (loading) {
     return (
