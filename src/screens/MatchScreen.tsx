@@ -37,6 +37,7 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
+import { COLORS } from '../utils/colors';
 
 // Fallback helper to compare arrays without pulling in an additional
 // dependency at runtime. If `fast-deep-equal` is present it will be used.
@@ -71,16 +72,6 @@ type Candidate = {
   profile: UserDoc;
 };
 
-const COLORS = {
-  bg: '#0f172a',
-  text: '#e5e7eb',
-  sub: '#9ca3af',
-  border: 'rgba(255,255,255,0.15)',
-  brand: '#7c3aed',
-  card: 'rgba(255,255,255,0.06)',
-  danger: '#fb7185',
-  ok: '#10b981',
-};
 
 const MAX_INTERESTS_MATCH = 10; // para queries com array-contains-any
 const MAX_INTERESTS = 30; // ajusta ao teu limite

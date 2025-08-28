@@ -35,18 +35,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { INTERESTS_SEED, Interest } from '../utils/interestsSeed';
-
-const COLORS = {
-  bg: '#0f172a',
-  text: '#e5e7eb',
-  sub: '#9ca3af',
-  border: 'rgba(255,255,255,0.15)',
-  brand: '#7c3aed',
-  card: 'rgba(255,255,255,0.06)',
-  input: 'rgba(255,255,255,0.08)',
-  danger: '#fb7185',
-  ok: '#10b981',
-};
+import { COLORS } from '../utils/colors';
 
 type AppConfig = {
   maxInterests?: number;
