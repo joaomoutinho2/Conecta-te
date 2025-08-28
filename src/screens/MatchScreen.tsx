@@ -20,6 +20,7 @@ import {
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../services/firebase';
+import useNetwork from '../hooks/useNetwork';
 import {
   collection,
   doc,
@@ -92,6 +93,7 @@ function matchIdFor(a: string, b: string) {
 export default function MatchScreen({ navigation }: any) {
   const tabBarHeight = useBottomTabBarHeight();
   const uid = auth.currentUser?.uid!;
+  const { isConnected } = useNetwork(db);
   const [me, setMe] = useState<UserDoc | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -348,6 +350,11 @@ export default function MatchScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
+      {!isConnected && (
+        <View style={{ backgroundColor: COLORS.danger, padding: 8 }}>
+          <Text style={{ color: '#fff', textAlign: 'center' }}>Sem ligação à internet</Text>
+        </View>
+      )}
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: tabBarHeight + 24, paddingTop: 12 }}>
         {/* Header */}
         <View style={{ paddingBottom: 12, borderBottomWidth: 1, borderColor: COLORS.border, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>

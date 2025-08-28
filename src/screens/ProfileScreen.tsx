@@ -23,6 +23,7 @@ import { signOut } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import useNetwork from '../hooks/useNetwork';
 
 type UserDoc = {
   nickname?: string;
@@ -55,6 +56,7 @@ export default function ProfileScreen() {
   const { userDoc } = useAuth();
   const uid = auth.currentUser?.uid!;
   const email = auth.currentUser?.email ?? '';
+  const { isConnected } = useNetwork(db);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -290,6 +292,11 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
+      {!isConnected && (
+        <View style={{ backgroundColor: COLORS.danger, padding: 8 }}>
+          <Text style={{ color: '#fff', textAlign: 'center' }}>Sem ligação à internet</Text>
+        </View>
+      )}
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.select({ ios: 'padding', android: undefined })}
