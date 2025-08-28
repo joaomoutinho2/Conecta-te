@@ -18,7 +18,7 @@ import {
 } from 'react-native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { db } from '../services/firebase';
+import { app, db } from '../services/firebase';
 import useNetwork from '../hooks/useNetwork';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -36,6 +36,7 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { COLORS } from '../utils/colors';
 
 // Fallback helper to compare arrays without pulling in an additional
@@ -226,10 +227,13 @@ export default function MatchScreen({ navigation }: any) {
           createdAt: serverTimestamp(),
         });
 
-        // marcar ambos como matched (simples; em produção, poderias remover da queue)
+        // marcar este utilizador como matched
         tx.update(qMeRef, { status: 'matched', ts: serverTimestamp() });
-        tx.update(qOtRef, { status: 'matched', ts: serverTimestamp() });
       });
+
+      // marcar o outro utilizador através de função privilegiada
+      const markMatched = httpsCallable(getFunctions(app), 'markQueueMatched');
+      await markMatched({ uid: otherUid });
 
       // navega para o chat
       navigation.navigate('Chat', { mid, otherUid });
