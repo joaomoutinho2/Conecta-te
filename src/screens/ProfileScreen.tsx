@@ -20,7 +20,8 @@ import { useNavigation } from '@react-navigation/native';
 
 import { auth, db, storage } from '../services/firebase';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 type UserDoc = {
@@ -51,6 +52,7 @@ const COLORS = {
 
 export default function ProfileScreen() {
   const navigation = useNavigation<any>();
+  const { userDoc } = useAuth();
   const uid = auth.currentUser?.uid!;
   const email = auth.currentUser?.email ?? '';
 
@@ -166,33 +168,18 @@ export default function ProfileScreen() {
 
   // ---------- load ----------
   useEffect(() => {
-    let mount = true;
-    (async () => {
-      try {
-        const snap = await getDoc(doc(db, 'users', uid));
-        if (!mount) return;
-
-        if (snap.exists()) {
-          const u = snap.data() as UserDoc;
-          setNickname(u.nickname || u.displayName || '');
-          setAgeStr(typeof u.age === 'number' ? String(u.age) : '');
-          setBio(u.bio || '');
-          setProfileRemote(u.profilePhoto || null);
-          setAvatarRemote(u.avatar || null);
-        } else {
-          setNickname(auth.currentUser?.displayName || '');
-        }
-      } catch (e) {
-        console.error(e);
-        Alert.alert('Erro', 'Não foi possível carregar o teu perfil.');
-      } finally {
-        if (mount) setLoading(false);
-      }
-    })();
-    return () => {
-      mount = false;
-    };
-  }, [uid]);
+    if (!userDoc) {
+      setNickname(auth.currentUser?.displayName || '');
+      setLoading(false);
+      return;
+    }
+    setNickname(userDoc.nickname || userDoc.displayName || '');
+    setAgeStr(typeof userDoc.age === 'number' ? String(userDoc.age) : '');
+    setBio(userDoc.bio || '');
+    setProfileRemote(userDoc.profilePhoto || null);
+    setAvatarRemote(userDoc.avatar || null);
+    setLoading(false);
+  }, [userDoc]);
 
   // ---------- upload helper ----------
   const uploadToStorage = useCallback(async (localUri: string, remotePath: string) => {

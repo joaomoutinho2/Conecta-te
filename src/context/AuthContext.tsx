@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth, db } from '../services/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { InteractionManager } from 'react-native';
 
 type UserDoc = {
   profileCompleted?: boolean;
@@ -44,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsub();
   }, []);
 
-  // 2) doc do utilizador (só quando autenticado)
+// 2) doc do utilizador (só quando autenticado)
   useEffect(() => {
     setUserDoc(null);
     setDocReady(false);
@@ -53,16 +54,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setDocReady(true);
       return;
     }
-    const ref = doc(db, 'users', user.uid);
-    const unsub = onSnapshot(
-      ref,
-      (snap) => {
-        setUserDoc(snap.exists() ? (snap.data() as UserDoc) : null);
-        setDocReady(true);
-      },
-      () => setDocReady(true)
-    );
-    return () => unsub();
+    let unsub: (() => void) | undefined;
+    const task = InteractionManager.runAfterInteractions(() => {
+      const ref = doc(db, 'users', user.uid);
+      unsub = onSnapshot(
+        ref,
+        (snap) => {
+          setUserDoc(snap.exists() ? (snap.data() as UserDoc) : null);
+          setDocReady(true);
+        },
+        () => setDocReady(true)
+      );
+    });
+    return () => {
+      if (unsub) unsub();
+      task.cancel();
+    };
   }, [user]);
 
   const loading = !authReady || (user ? !docReady : false);
