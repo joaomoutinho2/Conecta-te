@@ -1,6 +1,7 @@
 // src/screens/MatchScreen.tsx
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+import {
   View,
   Text,
   TouchableOpacity,
@@ -9,8 +10,27 @@ import {
   SafeAreaView,
   Image,
   ScrollView,
-  InteractionManager,
 } from 'react-native';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { InteractionManager } from 'react-native';
+import { auth, db } from '../services/firebase';
+import {
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  getDocs,
+  setDoc,
+  doc,
+  runTransaction,
+} from 'firebase/firestore';
+let isEqual;
+try {
+  isEqual = require('fast-deep-equal');
+} catch {
+  isEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+}
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../services/firebase';
@@ -65,6 +85,7 @@ const COLORS = {
 };
 
 const MAX_INTERESTS_MATCH = 10; // para queries com array-contains-any
+const MAX_INTERESTS = 30; // ajusta ao teu limite
 const FETCH_LIMIT = 40;         // candidatos por batch
 
 function matchIdFor(a: string, b: string) {
@@ -81,6 +102,9 @@ export default function MatchScreen({ navigation }: any) {
   const [candidate, setCandidate] = useState<Candidate | null>(null);
 
   // 1) Ler o meu perfil e garantir que estou na queue “waiting” com os interesses atualizados
+  const prevInterestsRef = useRef<string[] | null>(null);
+  const lastWriteRef = useRef<number>(0);
+
   useEffect(() => {
     if (!uid) return;
     let unsub: any;
@@ -90,18 +114,23 @@ export default function MatchScreen({ navigation }: any) {
           unsub = onSnapshot(doc(db, 'users', uid), async (snap) => {
             const data = (snap.exists() ? (snap.data() as UserDoc) : null);
             setMe(data);
-            // atualizar /match_queue/{uid}
-            if (data?.interests?.length) {
-              const qRef = doc(db, 'match_queue', uid);
-              await setDoc(
-                qRef,
-                {
-                  status: 'waiting',
-                  interests: data.interests.slice(0, MAX_INTERESTS_MATCH),
-                  ts: serverTimestamp(),
-                } as QueueDoc,
-                { merge: true }
-              );
+            const interests = (data?.interests ?? []).slice(0, MAX_INTERESTS);
+
+            // Dedupe por conteúdo
+            if (prevInterestsRef.current && isEqual(prevInterestsRef.current, interests)) return;
+            prevInterestsRef.current = interests;
+
+            // Throttle: no máx. 1 write por 5s
+            const now = Date.now();
+            if (now - lastWriteRef.current < 5000) return;
+            lastWriteRef.current = now;
+
+            if (interests.length) {
+              await setDoc(doc(db, 'match_queue', uid), {
+                status: 'waiting',
+                interests,
+                ts: serverTimestamp(),
+              }, { merge: true });
             }
             setLoading(false);
           });

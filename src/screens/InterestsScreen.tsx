@@ -1,16 +1,8 @@
 // src/screens/InterestsScreen.tsx
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ActivityIndicator,
-  Alert,
-  SafeAreaView,
-  TextInput,
-  ScrollView,
-  InteractionManager,
-} from 'react-native';
+import React, { useMemo, useState, useCallback } from 'react';
+import { View, Text, TextInput, TouchableOpacity, FlatList, ActivityIndicator, Alert, SafeAreaView } from 'react-native';
+import ReactMemo from 'react';
+import useDebouncedValue from '../hooks/useDebouncedValue';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { auth, db } from '../services/firebase';
@@ -55,7 +47,8 @@ export default function InterestsScreen({ navigation }: any) {
   const [selected, setSelected] = useState<string[]>([]);
   const [initialSelected, setInitialSelected] = useState<string[]>([]);
 
-  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  const debouncedQuery = useDebouncedValue(query, 250);
   const [cat, setCat] = useState<string>('Todos');
 
   const [maxInterests, setMaxInterests] = useState<number>(5);
@@ -90,11 +83,16 @@ export default function InterestsScreen({ navigation }: any) {
   }, [items]);
 
   const filtered = useMemo(() => {
-    const byCat = cat === 'Todos' ? items : items.filter((i) => i.cat === cat);
-    const term = search.trim().toLowerCase();
-    if (!term) return byCat;
-    return byCat.filter((i) => i.name.toLowerCase().includes(term) || i.id.toLowerCase().includes(term));
-  }, [items, cat, search]);
+    const q = debouncedQuery.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter(i => i.name.toLowerCase().includes(q));
+  }, [items, debouncedQuery]);
+
+  const renderItem = useCallback(({ item }: { item: Interest }) => (
+    <InterestChip item={item} onPress={() => toggle(item.id)} />
+  ), [toggle]);
+
+  const keyExtractor = useCallback((i:any) => i.id, []);
 
   // ---------- seed interests if needed ----------
   const seedIfEmpty = useCallback(async () => {
@@ -121,24 +119,46 @@ export default function InterestsScreen({ navigation }: any) {
 
   // ---------- load on mount ----------
   useEffect(() => {
-    let mounted = true;
-    const task = InteractionManager.runAfterInteractions(() => {
-      (async () => {
-        try {
+      let mounted = true;
+      const task = InteractionManager.runAfterInteractions(() => {
+        (async () => {
+          try {
+            // Load interests
+            const interests = await seedIfEmpty();
+            if (mounted) setItems(interests);
+  
+            // Load user interests
+            if (uid) {
+              const userRef = doc(db, 'users', uid);
+              const userSnap = await getDoc(userRef);
+              const userData = userSnap.data();
+              const userInterests = userData?.interests ?? [];
+              if (mounted) {
+                setSelected(userInterests);
+                setInitialSelected(userInterests);
+              }
+            }
+  
+            // Load app config (maxInterests)
+            const configRef = doc(db, 'app', 'config');
+            const configSnap = await getDoc(configRef);
+            const configData = configSnap.data() as AppConfig | undefined;
+            if (mounted && configData?.maxInterests) {
+              setMaxInterests(configData.maxInterests);
+            }
+          } catch (e) {
+            console.error(e);
+            Alert.alert('Erro', 'Não foi possível carregar os interesses.');
+          } finally {
+            if (mounted) setLoading(false);
           }
-        } catch (e) {
-          console.error(e);
-          Alert.alert('Erro', 'Não foi possível carregar os interesses.');
-        } finally {
-          if (mounted) setLoading(false);
-        }
-      })();
-    });
-    return () => {
-      mounted = false;
-      task.cancel();
-    };
-  }, [uid, seedIfEmpty]);
+        })();
+      });
+      return () => {
+        mounted = false;
+        task.cancel();
+      };
+    }, [uid, seedIfEmpty]);
 
   // ---------- save ----------
   const onSave = useCallback(async () => {
@@ -193,10 +213,7 @@ export default function InterestsScreen({ navigation }: any) {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg }}>
-      <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: tabBarHeight + 24 }}
-        keyboardShouldPersistTaps="handled"
-      >
+      <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: tabBarHeight + 24, flex: 1 }}>
         {/* header */}
         <View style={{ paddingBottom: 12, borderBottomWidth: 1, borderColor: COLORS.border, marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <Ionicons name="pricetags" size={20} color={COLORS.brand} />
@@ -218,14 +235,14 @@ export default function InterestsScreen({ navigation }: any) {
         >
           <Ionicons name="search" size={16} color={COLORS.sub} />
           <TextInput
-            value={search}
-            onChangeText={setSearch}
+            value={query}
+            onChangeText={setQuery}
             placeholder="Pesquisar..."
             placeholderTextColor={COLORS.sub}
             style={{ flex: 1, color: COLORS.text, paddingVertical: 10, marginLeft: 8 }}
           />
-          {search ? (
-            <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          {query ? (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons name="close-circle" size={18} color={COLORS.sub} />
             </TouchableOpacity>
           ) : null}
@@ -256,15 +273,17 @@ export default function InterestsScreen({ navigation }: any) {
         </View>
 
         {/* lista de interesses (filtrada) */}
-        <View style={{ marginTop: 8 }}>
-          <Text style={{ color: COLORS.text, fontWeight: '800', marginBottom: 8 }}>Sugestões</Text>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            {filtered.map((it) => {
-              const active = selected.includes(it.id);
-              return <Chip key={it.id} label={it.name} active={active} onPress={() => toggle(it.id)} />;
-            })}
-          </View>
-        </View>
+        <Text style={{ color: COLORS.text, fontWeight: '800', marginBottom: 8 }}>Sugestões</Text>
+        <FlatList
+          data={filtered}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          initialNumToRender={24}
+          maxToRenderPerBatch={16}
+          windowSize={7}
+          removeClippedSubviews
+          keyboardShouldPersistTaps="handled"
+        />
 
         {/* ações */}
         <View style={{ height: 16 }} />
@@ -294,7 +313,7 @@ export default function InterestsScreen({ navigation }: any) {
         <Text style={{ color: COLORS.sub, fontSize: 12 }}>
           Estas escolhas ajudam a sugerir-te pessoas com mais afinidade. Podes alterá-las quando quiseres.
         </Text>
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
