@@ -15,7 +15,6 @@ import {
   SafeAreaView,
   Image,
   ScrollView,
-  InteractionManager,
 } from 'react-native';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -98,41 +97,38 @@ export default function MatchScreen({ navigation }: any) {
   useEffect(() => {
     if (!uid) return;
     let unsub: any;
-    const task = InteractionManager.runAfterInteractions(() => {
-      (async () => {
-        try {
-          unsub = onSnapshot(doc(db, 'users', uid), async (snap) => {
-            const data = (snap.exists() ? (snap.data() as UserDoc) : null);
-            setMe(data);
-            const interests = (data?.interests ?? []).slice(0, MAX_INTERESTS);
+    (async () => {
+      try {
+        unsub = onSnapshot(doc(db, 'users', uid), async (snap) => {
+          const data = (snap.exists() ? (snap.data() as UserDoc) : null);
+          setMe(data);
+          const interests = (data?.interests ?? []).slice(0, MAX_INTERESTS);
 
-            // Dedupe por conteúdo
-            if (prevInterestsRef.current && isEqual(prevInterestsRef.current, interests)) return;
-            prevInterestsRef.current = interests;
+          // Dedupe por conteúdo
+          if (prevInterestsRef.current && isEqual(prevInterestsRef.current, interests)) return;
+          prevInterestsRef.current = interests;
 
-            // Throttle: no máx. 1 write por 5s
-            const now = Date.now();
-            if (now - lastWriteRef.current < 5000) return;
-            lastWriteRef.current = now;
+          // Throttle: no máx. 1 write por 5s
+          const now = Date.now();
+          if (now - lastWriteRef.current < 5000) return;
+          lastWriteRef.current = now;
 
-            if (interests.length) {
-              await setDoc(doc(db, 'match_queue', uid), {
-                status: 'waiting',
-                interests,
-                ts: serverTimestamp(),
-              }, { merge: true });
-            }
-            setLoading(false);
-          });
-        } catch (e) {
-          console.error('[match:init]', e);
+          if (interests.length) {
+            await setDoc(doc(db, 'match_queue', uid), {
+              status: 'waiting',
+              interests,
+              ts: serverTimestamp(),
+            }, { merge: true });
+          }
           setLoading(false);
-        }
-      })();
-    });
+        });
+      } catch (e) {
+        console.error('[match:init]', e);
+        setLoading(false);
+      }
+    })();
 
     return () => {
-      task.cancel();
       unsub && unsub();
     };
   }, [uid]);
