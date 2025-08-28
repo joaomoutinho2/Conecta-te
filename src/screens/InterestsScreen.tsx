@@ -125,26 +125,6 @@ export default function InterestsScreen({ navigation }: any) {
     const task = InteractionManager.runAfterInteractions(() => {
       (async () => {
         try {
-          const [cfgSnap, list, uSnap] = await Promise.all([
-            getDoc(doc(db, 'app_config', 'general')).catch(() => null),
-            seedIfEmpty(),
-            getDoc(doc(db, 'users', uid)).catch(() => null),
-          ]);
-
-          if (cfgSnap?.exists()) {
-            const cfg = (cfgSnap.data() as AppConfig) || {};
-            if (typeof cfg.maxInterests === 'number') {
-              setMaxInterests(cfg.maxInterests);
-            }
-          }
-          if (!mounted) return;
-          setItems(list);
-
-          if (uSnap?.exists()) {
-            const u = uSnap.data() as any;
-            const my = (u?.interests as string[]) || [];
-            setSelected(my);
-            setInitialSelected(my);
           }
         } catch (e) {
           console.error(e);
