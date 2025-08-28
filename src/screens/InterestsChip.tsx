@@ -43,7 +43,7 @@ export default function InterestChip({
   style,
   textStyle,
 }: InterestChipProps) {
-  const S = size === 'sm' ? styles.sm : styles.md;
+  const S = sizeStyles[size];
 
   return (
     <TouchableOpacity
@@ -103,6 +103,9 @@ const styles = StyleSheet.create({
   text: {
     fontWeight: '700',
   },
+});
+
+const sizeStyles: Record<Size, { container: ViewStyle; text: TextStyle }> = {
   sm: {
     container: { paddingVertical: 6 },
     text: { fontSize: 11 },
@@ -111,4 +114,4 @@ const styles = StyleSheet.create({
     container: { paddingVertical: 8 },
     text: { fontSize: 12 },
   },
-}) as const;
+};
