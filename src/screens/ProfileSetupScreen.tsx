@@ -282,6 +282,22 @@ export default function ProfileSetupScreen() {
     try {
       setSaving(true);
 
+      const userRef = doc(db, 'users', uid);
+      let cached: Partial<UserDoc> | undefined;
+      try {
+        const cachedSnap = await getDocFromCache(userRef);
+        if (cachedSnap.exists()) {
+          cached = cachedSnap.data() as UserDoc;
+        }
+      } catch (_) {}
+
+      const offline = typeof navigator !== 'undefined' && (navigator as any).onLine === false;
+      if (!cached && offline) {
+        Alert.alert('Offline', 'Sem ligação à internet e sem dados locais. Não foi possível guardar o perfil.');
+        setSaving(false);
+        return;
+      }
+
       let profileUrl = profileRemote || null;
       let avatarUrl = avatarRemote || null;
 
@@ -300,8 +316,9 @@ export default function ProfileSetupScreen() {
       }
 
       await setDoc(
-        doc(db, 'users', uid),
+        userRef,
         {
+          ...(cached || {}),
           nickname: nick,
           displayName: nick,
           age: typeof age === 'number' ? age : null,
