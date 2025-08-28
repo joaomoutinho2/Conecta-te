@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function uid() {
+      return request.auth != null ? request.auth.uid : null;
+    }
+
+    match /match_queue/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && userId == uid();
+    }
+    // TODO: outras regras aqui
+  }
+}
