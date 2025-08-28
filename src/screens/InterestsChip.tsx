@@ -31,7 +31,7 @@ export type InterestChipProps = {
  * - Tamanhos: sm/md
  * - Mostra #label por padrão (showHash)
  */
-export default function InterestChip({
+function InterestChip({
   label,
   active = false,
   disabled = false,
@@ -83,6 +83,8 @@ export default function InterestChip({
     </TouchableOpacity>
   );
 }
+
+export default React.memo(InterestChip);
 
 const COLORS = {
   text: '#e5e7eb',
