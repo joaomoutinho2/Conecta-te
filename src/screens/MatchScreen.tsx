@@ -93,8 +93,6 @@ export default function MatchScreen({ navigation }: any) {
   const prevInterestsRef = useRef<string[] | null>(null);
   const lastWriteRef = useRef<number>(0);
 
-  useEffect(() => {
-
   // pontuação de afinidade simples (nº de interesses em comum, desempate por idade próxima se existir)
   const scoreCandidate = useCallback((mine: UserDoc, other: UserDoc) => {
     const mineSet = new Set(mine.interests || []);
