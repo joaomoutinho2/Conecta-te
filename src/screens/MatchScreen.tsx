@@ -25,6 +25,8 @@ import {
   doc,
   getDoc,
   getDocs,
+  getDocFromCache,
+  getDocsFromCache,
   limit,
   onSnapshot,
   orderBy,
@@ -173,21 +175,52 @@ export default function MatchScreen({ navigation }: any) {
         limit(FETCH_LIMIT)
       );
 
-      const qs = await getDocs(q);
-      if (qs.empty) {
+      let qs;
+      try {
+        qs = await getDocs(q);
+      } catch (err: any) {
+        if (err.code === 'unavailable') {
+          try {
+            qs = await getDocsFromCache(q);
+          } catch {
+            Alert.alert('Sem ligação à internet');
+            return;
+          }
+        } else {
+          throw err;
+        }
+      }
+
+      if (!qs || qs.empty) {
         setCandidate(null);
         Alert.alert('Sem candidatos agora', 'Volta a tentar em breve.');
         return;
       }
 
+      let offline = false;
       const candidates = (
         await Promise.all(
           qs.docs.map(async (d) => {
             const otherUid = d.id;
             if (otherUid === uid) return null;
 
-            const userSnap = await getDoc(doc(db, 'users', otherUid));
-            if (!userSnap.exists()) return null;
+            const userRef = doc(db, 'users', otherUid);
+            let userSnap;
+            try {
+              userSnap = await getDoc(userRef);
+            } catch (err: any) {
+              if (err.code === 'unavailable') {
+                try {
+                  userSnap = await getDocFromCache(userRef);
+                } catch {
+                  offline = true;
+                  return null;
+                }
+              } else {
+                return null;
+              }
+            }
+            if (!userSnap || !userSnap.exists()) return null;
 
             const profile = userSnap.data() as UserDoc;
             const { shared, score } = scoreCandidate(me, profile);
@@ -197,6 +230,10 @@ export default function MatchScreen({ navigation }: any) {
           })
         )
       ).filter(Boolean) as Candidate[];
+
+      if (offline) {
+        Alert.alert('Sem ligação à internet');
+      }
 
       candidates.sort((a, b) => b.score - a.score);
       setCandidate(candidates[0] || null);

@@ -24,10 +24,12 @@ import { auth, db } from '../services/firebase';
 import {
   collection,
   getDocs,
+  getDocsFromCache,
   orderBy,
   query as fsQuery,
   doc,
   getDoc,
+  getDocFromCache,
   setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -175,21 +177,43 @@ export default function InterestsScreen({ navigation }: any) {
     setLoading(false);
 
     (async () => {
+      let offline = false;
       try {
-        const interestsPromise = withTimeout(
-          getDocs(fsQuery(collection(db, 'interests'), orderBy('name'))),
-          5000
-        );
-        const userPromise = uid
-          ? withTimeout(getDoc(doc(db, 'users', uid)), 5000)
-          : Promise.resolve(null);
-        const configPromise = withTimeout(getDoc(doc(db, 'app', 'config')), 5000);
+        const interestsQuery = fsQuery(collection(db, 'interests'), orderBy('name'));
+        let snap = await withTimeout(getDocs(interestsQuery), 5000);
+        if (!snap) {
+          try {
+            snap = await getDocsFromCache(interestsQuery);
+          } catch {
+            snap = null;
+          }
+        }
+        if (!snap) offline = true;
 
-        const [snap, userSnap, configSnap] = await Promise.all([
-          interestsPromise,
-          userPromise,
-          configPromise,
-        ]);
+        let userSnap: any = null;
+        if (uid) {
+          const userRef = doc(db, 'users', uid);
+          userSnap = await withTimeout(getDoc(userRef), 5000);
+          if (!userSnap) {
+            try {
+              userSnap = await getDocFromCache(userRef);
+            } catch {
+              userSnap = null;
+            }
+          }
+          if (!userSnap) offline = true;
+        }
+
+        const configRef = doc(db, 'app', 'config');
+        let configSnap = await withTimeout(getDoc(configRef), 5000);
+        if (!configSnap) {
+          try {
+            configSnap = await getDocFromCache(configRef);
+          } catch {
+            configSnap = null;
+          }
+        }
+        if (!configSnap) offline = true;
 
         if (mounted && snap && !snap.empty) {
           setItems(
@@ -207,6 +231,10 @@ export default function InterestsScreen({ navigation }: any) {
         if (mounted && configSnap && configSnap.exists()) {
           const configData = configSnap.data() as AppConfig;
           if (configData?.maxInterests) setMaxInterests(configData.maxInterests);
+        }
+
+        if (offline) {
+          Alert.alert('Sem ligação à internet');
         }
       } catch (e) {
         console.error(e);
