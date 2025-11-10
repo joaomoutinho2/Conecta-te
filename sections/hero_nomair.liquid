@@ -1,0 +1,272 @@
+{% liquid
+  assign hero_product = section.settings.product
+  assign hero_media = nil
+
+  if hero_product and hero_product != blank
+    assign hero_media = hero_product.featured_media
+  endif
+
+  assign hero_image = nil
+  if hero_media
+    if hero_media.preview_image
+      assign hero_image = hero_media.preview_image
+    else
+      assign hero_image = hero_media
+    endif
+  endif
+
+  if hero_image == nil or hero_image == blank
+    assign featured_collection = section.settings.collection
+    if featured_collection and featured_collection != blank
+      assign first_product = featured_collection.products | first
+      if first_product
+        if first_product.featured_media and first_product.featured_media.preview_image
+          assign hero_image = first_product.featured_media.preview_image
+        elsif first_product.featured_image
+          assign hero_image = first_product.featured_image
+        endif
+      endif
+
+      if (hero_image == nil or hero_image == blank) and featured_collection.image
+        assign hero_image = featured_collection.image
+      endif
+    endif
+  endif
+
+  assign hero_image_alt = section.settings.image_alt | default: hero_image.alt | default: hero_product.title | default: section.settings.heading
+%}
+
+<section class="hero-nomair" id="HeroNomair-{{ section.id }}">
+  <div class="hero-nomair__inner">
+    <div class="hero-nomair__content">
+      {% if section.settings.subheading != blank %}
+        <p class="hero-nomair__subheading">{{ section.settings.subheading }}</p>
+      {% endif %}
+      {% if section.settings.heading != blank %}
+        <h2 class="hero-nomair__heading">{{ section.settings.heading }}</h2>
+      {% endif %}
+      {% if section.settings.description != blank %}
+        <div class="hero-nomair__description">{{ section.settings.description }}</div>
+      {% endif %}
+      <div class="hero-nomair__buttons">
+        {% if section.settings.primary_link != blank %}
+          <a class="hero-nomair__button hero-nomair__button--primary" href="{{ section.settings.primary_link }}">{{ section.settings.primary_label }}</a>
+        {% endif %}
+        {% if section.settings.secondary_link != blank %}
+          <a class="hero-nomair__button hero-nomair__button--secondary" href="{{ section.settings.secondary_link }}">{{ section.settings.secondary_label }}</a>
+        {% endif %}
+      </div>
+    </div>
+    {% if hero_image %}
+      <div class="hero-nomair__media">
+        <picture>
+          <source
+            srcset="{{ hero_image | image_url: width: 480, format: 'webp' }} 480w, {{ hero_image | image_url: width: 768, format: 'webp' }} 768w, {{ hero_image | image_url: width: 1024, format: 'webp' }} 1024w, {{ hero_image | image_url: width: 1440, format: 'webp' }} 1440w"
+            type="image/webp">
+          <img
+            src="{{ hero_image | image_url: width: 768 }}"
+            srcset="{{ hero_image | image_url: width: 480 }} 480w, {{ hero_image | image_url: width: 768 }} 768w, {{ hero_image | image_url: width: 1024 }} 1024w, {{ hero_image | image_url: width: 1440 }} 1440w"
+            sizes="(min-width: 768px) 50vw, 100vw"
+            alt="{{ hero_image_alt | escape }}"
+            loading="lazy"
+            class="hero-nomair__image">
+        </picture>
+      </div>
+    {% endif %}
+  </div>
+  <div class="hero-nomair__trust-strip">
+    <p>Envio 48–72h &middot; 30 dias devolução &middot; Pagamento seguro</p>
+  </div>
+</section>
+
+<style>
+  #shopify-section-{{ section.id }} .hero-nomair {
+    padding: 48px 20px 24px;
+    background-color: #ffffff;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__inner {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    align-items: stretch;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__subheading {
+    margin: 0;
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__heading {
+    margin: 0;
+    font-size: clamp(2rem, 5vw, 3rem);
+    line-height: 1.1;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__description {
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 24px;
+    border-radius: 999px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    border: 1px solid transparent;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__button--primary {
+    background-color: #111111;
+    color: #ffffff;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__button--primary:hover {
+    background-color: #333333;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__button--secondary {
+    background-color: transparent;
+    color: #111111;
+    border-color: #111111;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__button--secondary:hover {
+    background-color: #111111;
+    color: #ffffff;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__media {
+    width: 100%;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__image {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 24px;
+    object-fit: cover;
+  }
+
+  #shopify-section-{{ section.id }} .hero-nomair__trust-strip {
+    margin-top: 24px;
+    padding-top: 12px;
+    border-top: 1px solid #e5e5e5;
+    text-align: center;
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+  }
+
+  @media (min-width: 768px) {
+    #shopify-section-{{ section.id }} .hero-nomair {
+      padding: 72px 40px 32px;
+    }
+
+    #shopify-section-{{ section.id }} .hero-nomair__inner {
+      flex-direction: row;
+      align-items: center;
+    }
+
+    #shopify-section-{{ section.id }} .hero-nomair__content {
+      flex: 1 1 50%;
+    }
+
+    #shopify-section-{{ section.id }} .hero-nomair__media {
+      flex: 1 1 50%;
+    }
+
+    #shopify-section-{{ section.id }} .hero-nomair__trust-strip {
+      text-align: center;
+    }
+  }
+</style>
+
+{% schema %}
+{
+  "name": "Hero Nomair",
+  "settings": [
+    {
+      "type": "text",
+      "id": "subheading",
+      "label": "Subheading",
+      "default": "Coleção exclusiva"
+    },
+    {
+      "type": "text",
+      "id": "heading",
+      "label": "Heading",
+      "default": "Descubra o conforto premium"
+    },
+    {
+      "type": "richtext",
+      "id": "description",
+      "label": "Texto",
+      "default": "<p>Materiais superiores e design pensado para o dia a dia.</p>"
+    },
+    {
+      "type": "product",
+      "id": "product",
+      "label": "Produto em destaque"
+    },
+    {
+      "type": "collection",
+      "id": "collection",
+      "label": "Coleção de fallback"
+    },
+    {
+      "type": "text",
+      "id": "primary_label",
+      "label": "Texto do botão principal",
+      "default": "Comprar agora"
+    },
+    {
+      "type": "url",
+      "id": "primary_link",
+      "label": "Link do botão principal"
+    },
+    {
+      "type": "text",
+      "id": "secondary_label",
+      "label": "Texto do botão secundário",
+      "default": "Ver vídeo"
+    },
+    {
+      "type": "url",
+      "id": "secondary_link",
+      "label": "Link do botão secundário"
+    },
+    {
+      "type": "text",
+      "id": "image_alt",
+      "label": "Texto alternativo personalizado",
+      "info": "Opcional. Se vazio, utiliza o texto alternativo da imagem."
+    }
+  ],
+  "presets": [
+    {
+      "name": "Hero Nomair",
+      "category": "Custom"
+    }
+  ]
+}
+{% endschema %}
